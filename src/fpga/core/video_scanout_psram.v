@@ -53,9 +53,9 @@ module video_scanout_psram (
     // Video clock domain - Line start detection
     // =========================================
 
-    // Detect which line we need to fetch (next visible line)
-    wire [9:0] fetch_line = y_count - VID_V_BPORCH + 1;  // Fetch line ahead
-    wire in_vactive = (y_count >= VID_V_BPORCH - 1) && (y_count < VID_V_BPORCH + VID_V_ACTIVE - 1);
+    // Detect which line we need to fetch (current visible line)
+    wire [9:0] fetch_line = y_count - VID_V_BPORCH;
+    wire in_vactive = (y_count >= VID_V_BPORCH) && (y_count < VID_V_BPORCH + VID_V_ACTIVE);
 
     // Generate fetch request at end of line (before next visible line)
     reg fetch_request;

@@ -243,8 +243,8 @@ typedef struct
 default_t       defaults[] =
 {
     {"mouse_sensitivity",&mouseSensitivity, 5},
-    {"sfx_volume",&snd_SfxVolume, 8},
-    {"music_volume",&snd_MusicVolume, 8},
+    {"sfx_volume",&snd_SfxVolume, 11},
+    {"music_volume",&snd_MusicVolume, 11},
     {"show_messages",&showMessages, 1},
 
 

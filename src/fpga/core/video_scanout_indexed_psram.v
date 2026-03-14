@@ -65,8 +65,8 @@ module video_scanout_indexed_psram (
     // =========================================
     // Video clock domain - request generation
     // =========================================
-    wire [9:0] fetch_line = y_count - VID_V_BPORCH + 1;  // Fetch one line ahead
-    wire in_vactive = (y_count >= VID_V_BPORCH - 1) && (y_count < VID_V_BPORCH + VID_V_ACTIVE - 1);
+    wire [9:0] fetch_line = y_count - VID_V_BPORCH;
+    wire in_vactive = (y_count >= VID_V_BPORCH) && (y_count < VID_V_BPORCH + VID_V_ACTIVE);
 
     reg fetch_request;
     reg fetch_request_ack_sync1, fetch_request_ack_sync2;
