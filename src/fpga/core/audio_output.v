@@ -136,24 +136,36 @@ wire [15:0] mix_clamp_r = (mix_r > 17'sd32767)  ? 16'h7FFF :
                            mix_r[15:0];
 
 // ============================================
-// DC blocker — removes DC offset to eliminate clicks/pops
-// from OPL2 key-on/off transients and level changes.
+// IIR low-pass filter + DC blocker + audio mix
+// (ported from openfpgaOS audio filter chain)
 // ============================================
-wire [15:0] dc_out_l;
-wire [15:0] dc_out_r;
+wire [15:0] filt_out_l;
+wire [15:0] filt_out_r;
 
-dc_blocker dc_blk_l (
-    .clk  (clk_audio),
-    .ce   (audio_pop),
-    .din  (mix_clamp_l),
-    .dout (dc_out_l)
-);
+audio_filters #(.CLK_RATE(12288000)) audio_filt (
+    .clk       (clk_audio),
+    .reset     (~reset_n),
 
-dc_blocker dc_blk_r (
-    .clk  (clk_audio),
-    .ce   (audio_pop),
-    .din  (mix_clamp_r),
-    .dout (dc_out_r)
+    // Filter coefficients — "Default" preset (low-pass)
+    .flt_rate  (32'd7056000),
+    .cx        (40'd4258969),
+    .cx0       (8'd3),
+    .cx1       (8'd3),
+    .cx2       (8'd1),
+    .cy0       (-24'd6216759),
+    .cy1       ( 24'd6143386),
+    .cy2       (-24'd2023767),
+
+    // Audio mix controls (passthrough, no attenuation)
+    .att       (5'b0),
+    .mix       (2'b0),
+
+    .is_signed (1'b1),
+    .core_l    (mix_clamp_l),
+    .core_r    (mix_clamp_r),
+
+    .audio_l   (filt_out_l),
+    .audio_r   (filt_out_r)
 );
 
 // Latch filtered output on audio_pop (48 kHz) so the I2S serializer
@@ -162,8 +174,8 @@ reg [15:0] active_l = 16'h0;
 reg [15:0] active_r = 16'h0;
 always @(posedge clk_audio) begin
     if (audio_pop) begin
-        active_l <= dc_out_l;
-        active_r <= dc_out_r;
+        active_l <= filt_out_l;
+        active_r <= filt_out_r;
     end
 end
 

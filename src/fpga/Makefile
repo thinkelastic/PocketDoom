@@ -74,9 +74,10 @@ full:
 
 # Clean Quartus build files
 clean:
-	rm -rf db incremental_db output_files/*.rpt output_files/*.summary
-	rm -f output_files/*.sof output_files/*.rbf output_files/*.done
-	rm -f output_files/*.smsg output_files/*.pin
+	rm -rf db incremental_db greybox_tmp
+	rm -rf output_files
+	rm -f $(PROJECT).qws $(PROJECT)_assignment_defaults.qdf $(PROJECT).ipregen.rpt
+	rm -f c5_pin_model_dump.txt mf_pllbase.xml
 
 # Show timing summary
 timing:

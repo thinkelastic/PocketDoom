@@ -771,7 +771,11 @@ set_global_assignment -name SIP_FILE core/mf_pllbase.sip
 set_global_assignment -name VERILOG_FILE core/video_scanout.v
 set_global_assignment -name VERILOG_FILE core/video_scanout_indexed.v
 set_global_assignment -name VERILOG_FILE core/audio_output.v
-set_global_assignment -name VERILOG_FILE core/dc_blocker.v
+set_global_assignment -name SYSTEMVERILOG_FILE core/audio/filters/iir_filter.sv
+set_global_assignment -name SYSTEMVERILOG_FILE core/audio/filters/iir_filter_tap.sv
+set_global_assignment -name SYSTEMVERILOG_FILE core/audio/filters/audio_filters.sv
+set_global_assignment -name SYSTEMVERILOG_FILE core/audio/filters/audio_mix.sv
+set_global_assignment -name SYSTEMVERILOG_FILE core/audio/filters/dc_blocker.sv
 set_global_assignment -name VERILOG_FILE core/link_mmio.v
 set_global_assignment -name VERILOG_FILE core/opl2_wrapper.v
 set_global_assignment -name VERILOG_FILE jtopl/jtopl.v
