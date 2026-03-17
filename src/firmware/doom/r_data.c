@@ -382,6 +382,33 @@ void R_GenerateLookup (int texnum)
 static int      gc_cachedlump;
 static byte*    gc_cacheddata;
 
+// ============================================
+// BRAM column cache
+//
+// Keeps recently-accessed 128-byte texture columns in fast BRAM.
+// R_DrawColumn reads source[(frac>>FRACBITS)&127], so each column
+// is exactly 128 bytes.  Columns in BRAM are single-cycle reads vs
+// potential D-cache misses (~14 cycles) from SDRAM.
+//
+// Direct-mapped, 128 entries.  Tag = SDRAM source pointer.
+// Invalidated once per frame by R_InvalidateColumnCache.
+//
+// IMPORTANT: only used for regular wall columns (R_DrawColumn).
+// Masked columns (R_DrawMaskedColumn) access post headers at
+// negative offsets from the pixel data, so they must NOT use this
+// cache.  Caching is applied in R_CacheColumn(), called from
+// R_RenderSegLoop only.
+// ============================================
+#define COL_CACHE_ENTRIES 128
+#define COL_CACHE_MASK    (COL_CACHE_ENTRIES - 1)
+
+typedef struct {
+    const byte *tag;
+    byte        data[128];
+} col_cache_entry_t;
+
+PD_FASTDATA static col_cache_entry_t col_cache[COL_CACHE_ENTRIES];
+
 PD_FASTTEXT byte*
 R_GetColumn
 ( int           tex,
@@ -411,6 +438,27 @@ R_GetColumn
 }
 
 //
+// R_CacheColumn
+//
+// Copy a 128-byte texture column into BRAM for fast single-cycle
+// reads by R_DrawColumn.  Only safe for regular wall columns
+// (never for masked columns which parse post headers at offset -3).
+//
+PD_FASTTEXT byte*
+R_CacheColumn(byte *src)
+{
+    int idx = ((unsigned int)(uintptr_t)src >> 2) & COL_CACHE_MASK;
+    col_cache_entry_t *e = &col_cache[idx];
+    if (e->tag == src)
+        return e->data;
+
+    /* Cache miss: copy 128 bytes from SDRAM to BRAM */
+    e->tag = src;
+    memcpy(e->data, src, 128);
+    return e->data;
+}
+
+//
 // R_InvalidateColumnCache
 //
 // Must be called before each frame to prevent stale pointers
@@ -420,6 +468,10 @@ void R_InvalidateColumnCache(void)
 {
     gc_cachedlump = -1;
     gc_cacheddata = NULL;
+
+    /* Clear BRAM column cache tags */
+    for (int i = 0; i < COL_CACHE_ENTRIES; i++)
+        col_cache[i].tag = NULL;
 }
 
 
@@ -518,9 +570,6 @@ void R_InitTextures (void)
 
     for (i=0 ; i<numtextures ; i++, directory++)
     {
-        if (!(i&63))
-            printf (".");
-
         if (i == numtextures1)
         {
             // Start looking in second texture file.
@@ -669,13 +718,13 @@ void R_InitColormaps (void)
 void R_InitData (void)
 {
     R_InitTextures ();
-    printf ("\nInitTextures");
+    printf ("InitTextures\n");
     R_InitFlats ();
-    printf ("\nInitFlats");
+    printf ("InitFlats");
     R_InitSpriteLumps ();
-    printf ("\nInitSprites");
+    printf ("\nInitSprites\n");
     R_InitColormaps ();
-    printf ("\nInitColormaps");
+    printf ("InitColormaps\n");
 }
 
 

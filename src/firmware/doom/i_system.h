@@ -45,6 +45,9 @@ byte*   I_ZoneBase (int *size);
 // returns current time in tics.
 int I_GetTime (void);
 
+// Returns sub-tic fraction (0..FRACUNIT) for interpolation.
+int I_GetTimeFrac (void);
+
 
 //
 // Called by D_DoomLoop,

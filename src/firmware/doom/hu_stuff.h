@@ -38,7 +38,7 @@
 
 #define HU_MSGREFRESH   KEY_ENTER
 #define HU_MSGX         0
-#define HU_MSGY         0
+#define HU_MSGY         RENDER_YOFF
 #define HU_MSGWIDTH     64      // in characters
 #define HU_MSGHEIGHT    1       // in lines
 

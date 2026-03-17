@@ -85,11 +85,21 @@ typedef struct
 } cliprange_t;
 
 
-#define MAXSEGS         32
+#define MAXSEGS         48
 
 // newend is one past the last valid seg
 cliprange_t*    newend;
 cliprange_t     solidsegs[MAXSEGS];
+
+// Check if screen range [x1,x2] is fully occluded by solid walls
+PD_FASTTEXT int
+R_SolidSegsOccluded(int x1, int x2)
+{
+    cliprange_t *s = solidsegs;
+    while (s->last < x2)
+        s++;
+    return (x1 >= s->first && x2 <= s->last);
+}
 
 
 
@@ -100,7 +110,7 @@ cliprange_t     solidsegs[MAXSEGS];
 //  e.g. single sided LineDefs (middle texture)
 //  that entirely block the view.
 //
-void
+PD_FASTTEXT void
 R_ClipSolidWallSegment
 ( int                   first,
   int                   last )
@@ -193,7 +203,7 @@ R_ClipSolidWallSegment
 // Does handle windows,
 //  e.g. LineDefs with upper and lower texture.
 //
-void
+PD_FASTTEXT void
 R_ClipPassWallSegment
 ( int   first,
   int   last )

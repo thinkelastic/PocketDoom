@@ -46,7 +46,7 @@ rcsid[] = "$Id: p_floor.c,v 1.4 1997/02/03 16:47:54 b1 Exp $";
 //
 // Move a plane (floor or ceiling) and check for crushing
 //
-result_e
+PD_FASTTEXT result_e
 T_MovePlane
 ( sector_t*     sector,
   fixed_t       speed,
@@ -207,7 +207,7 @@ T_MovePlane
 //
 // MOVE A FLOOR TO IT'S DESTINATION (UP OR DOWN)
 //
-void T_MoveFloor(floormove_t* floor)
+PD_FASTTEXT void T_MoveFloor(floormove_t* floor)
 {
     result_e    res;
 

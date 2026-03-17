@@ -165,6 +165,14 @@ void R_Init (void);
 // Called by M_Responder.
 void R_SetViewSize (int blocks, int detail);
 
+// Tic interpolation: smooth 60fps rendering between 35Hz game tics.
+// Call R_InterpolationSnapshot before each G_Ticker to save previous state.
+// Call R_InterpolationSetFrac after tics run to compute the sub-tic fraction.
+// Call R_InterpolationReset on level loads and teleports.
+void R_InterpolationSnapshot (void);
+void R_InterpolationSetFrac (void);
+void R_InterpolationReset (void);
+
 #endif
 //-----------------------------------------------------------------------------
 //

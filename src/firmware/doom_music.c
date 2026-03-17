@@ -3,7 +3,7 @@
  *
  * MUS format parser driving Nuked OPL3 (bit-perfect YMF262 emulator).
  * Reads instrument patches from the WAD's GENMIDI lump.
- * Synthesizes at 11,025 Hz — mixed into the SFX mixbuffer by I_UpdateSound().
+ * Drives the FPGA OPL2 hardware; audio is mixed in audio_output.v.
  */
 
 #include <stdint.h>
@@ -155,14 +155,14 @@ static int music_volume = 127;  /* 0-127 internal */
  * OPL helpers
  * ============================================ */
 
-static inline void
+PD_FASTTEXT static inline void
 opl_write(uint16_t reg, uint8_t val)
 {
     OPL2_ADDR = (uint32_t)(reg & 0xFF);  /* Bus stalls ~3.4 us */
     OPL2_DATA = (uint32_t)val;            /* Bus stalls ~23.5 us */
 }
 
-static void
+PD_FASTTEXT static void
 load_operator(int ch, const genmidi_op_t *op, int is_carrier)
 {
     int off = is_carrier ? op2_off[ch] : op1_off[ch];
@@ -174,7 +174,7 @@ load_operator(int ch, const genmidi_op_t *op, int is_carrier)
     opl_write(0xE0 + off, op->waveform & 0x07);
 }
 
-static void
+PD_FASTTEXT static void
 set_instrument(int ch, const genmidi_voice_t *v)
 {
     load_operator(ch, &v->modulator, 0);
@@ -190,7 +190,7 @@ set_instrument(int ch, const genmidi_voice_t *v)
     voices[ch].connection = v->feedback & 0x01;
 }
 
-static void
+PD_FASTTEXT static void
 set_volume(int ch, int velocity)
 {
     /* Scale velocity by music_volume (0-127) so the menu slider works */
@@ -213,7 +213,7 @@ set_volume(int ch, int velocity)
     }
 }
 
-static void
+PD_FASTTEXT static void
 set_frequency(int ch, int note, int key_on)
 {
     int semi  = note % 12;
@@ -236,7 +236,7 @@ set_frequency(int ch, int note, int key_on)
     voice_reg_b0[ch] = b0;
 }
 
-static void
+PD_FASTTEXT static void
 voice_key_off(int ch)
 {
     opl_write(0xB0 + ch, voice_reg_b0[ch] & ~0x20);
@@ -247,7 +247,7 @@ voice_key_off(int ch)
  * Voice allocation
  * ============================================ */
 
-static int
+PD_FASTTEXT static int
 alloc_voice(int mus_channel)
 {
     int i;
@@ -267,7 +267,7 @@ alloc_voice(int mus_channel)
  * Note on / off
  * ============================================ */
 
-static void
+PD_FASTTEXT static void
 note_on(int mus_channel, int note, int velocity)
 {
     int idx, instr_idx, play_note;
@@ -311,7 +311,7 @@ note_on(int mus_channel, int note, int velocity)
     voices[idx].instrument  = instr_idx;
 }
 
-static void
+PD_FASTTEXT static void
 note_off(int mus_channel, int note)
 {
     int i;
@@ -363,7 +363,7 @@ load_genmidi(void)
  * MUS parser
  * ============================================ */
 
-static int
+PD_FASTTEXT static int
 mus_read_byte(void)
 {
     if (!mus_data || mus_pos >= mus_length)
@@ -371,7 +371,7 @@ mus_read_byte(void)
     return mus_data[mus_pos++];
 }
 
-static int
+PD_FASTTEXT static int
 mus_read_delay(void)
 {
     int delay = 0;
@@ -384,7 +384,7 @@ mus_read_delay(void)
     return delay;
 }
 
-static void
+PD_FASTTEXT static void
 mus_process_events(void)
 {
     int done = 0;
@@ -474,7 +474,7 @@ static int      mus_time_init;
  * never slows down even if rendering is slow.
  * ============================================ */
 
-void
+PD_FASTTEXT void
 OPL_AdvanceMusic(void)
 {
     if (!genmidi_loaded || !mus_playing || mus_paused)

@@ -607,9 +607,9 @@ R_InitBuffer
 
     // Samw with base row offset.
     if (width == SCREENWIDTH)
-        viewwindowy = 0;
+        viewwindowy = RENDER_YOFF;
     else
-        viewwindowy = (SCREENHEIGHT-SBARHEIGHT-height) >> 1;
+        viewwindowy = RENDER_YOFF + (RENDER_HEIGHT-SBARHEIGHT-height) / 2;
 }
 
 

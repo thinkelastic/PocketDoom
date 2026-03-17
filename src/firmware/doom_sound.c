@@ -1,10 +1,11 @@
 /*
  * Doom sound driver for Analogue Pocket (PocketDoom)
  *
- * Implements the low-level i_sound interface using the FPGA's audio FIFO.
+ * Implements the low-level i_sound interface using the FPGA's audio hardware.
  * Mixer ported from the Linux reference (doom/linux-x11/i_sound.c).
- * Mixes at 11,025 Hz internally, upsamples to 48 kHz for hardware output.
- * Music is handled by doom_music.c (OPL2 synthesizer) and mixed in here.
+ * Mixes at 11,025 Hz internally, writes directly to the FPGA's BRAM ring
+ * buffer via MMIO.  The FPGA hardware upsampler handles 11→48 kHz conversion.
+ * Music is handled by doom_music.c (OPL2 synthesizer).
  */
 
 #include <stdint.h>
@@ -30,9 +31,9 @@ extern void OPL_AdvanceMusic(void);
 #define AUDIO_SAMPLE    (*(volatile uint32_t *)0x4C000000)  /* Write: {L[15:0], R[15:0]} */
 #define AUDIO_STATUS    (*(volatile uint32_t *)0x4C000004)  /* Read: [12]=full, [11:0]=level */
 
-#define FIFO_LEVEL(s)   ((s) & 0xFFF)
-#define FIFO_FULL(s)    ((s) & (1 << 12))
-#define FIFO_DEPTH      4096
+#define BUF_LEVEL(s)    ((s) & 0x3FF)
+#define BUF_DEPTH       512
+#define BUF_TARGET      448   /* Target ~87% full — 40ms headroom for heavy frames */
 
 /* ============================================
  * Mixer constants
@@ -41,12 +42,6 @@ extern void OPL_AdvanceMusic(void);
 #define SAMPLECOUNT     512
 #define NUM_CHANNELS    8
 #define SAMPLERATE      11025
-#define OUTPUT_RATE     48000
-
-/* Upsampling: fixed-point 16.16 step for advancing through 11 kHz source */
-#define UPSAMPLE_STEP   ((SAMPLERATE << 16) / OUTPUT_RATE)  /* ~15052 */
-/* Number of 48 kHz output samples per 512 source samples */
-#define UPSAMPLE_COUNT  ((SAMPLECOUNT * OUTPUT_RATE) / SAMPLERATE)  /* ~2228 */
 
 /* ============================================
  * Mixer state (ported from linux-x11/i_sound.c)
@@ -54,9 +49,6 @@ extern void OPL_AdvanceMusic(void);
 
 /* Actual lengths of all sound effects */
 static int lengths[NUMSFX];
-
-/* Global mixing buffer: 512 stereo samples, interleaved L-R */
-static signed short mixbuffer[SAMPLECOUNT * 2];
 
 /* Channel data pointers, start and end */
 static unsigned char *channels[NUM_CHANNELS];
@@ -242,12 +234,12 @@ void I_SetChannels(void)
      * 8 channels sum to 260K, far exceeding 16-bit range (±32,767).
      * The FPGA also adds OPL music on top.
      *
-     * Scale by 1/8: max per channel = 127*32 = 4064.
-     * 8 channels worst-case = 32512.  Soft clamp in mixer and
-     * hardware clamp in audio_output.v handle rare peaks. */
+     * Scale: max per channel = 127*108 = 13716.
+     * Soft clamp in mixer and hardware clamp in audio_output.v
+     * handle peaks that exceed 16-bit range. */
     for (i = 0; i < 128; i++)
         for (j = 0; j < 256; j++)
-            vol_lookup[i * 256 + j] = (i * (j - 128) * 32) / 127;
+            vol_lookup[i * 256 + j] = (i * (j - 128) * 256) / 127;
 }
 
 /* ============================================
@@ -297,59 +289,49 @@ void I_UpdateSoundParams(int handle, int vol, int sep, int pitch)
 }
 
 /* ============================================
- * Async submission state (used by I_UpdateSound and I_SubmitSound)
+ * I_UpdateSound - Mix all active channels into HW ring buffer
  * ============================================ */
 
-static unsigned int submit_src_pos;    /* 16.16 fixed-point position in source */
-static int submit_remaining;           /* Output samples left to push */
-static int submit_pending;             /* 1 if mixbuffer has unsubmitted data */
-static int submit_mix_count;           /* Source samples in current mixbuffer */
+/* Set to 1 to play a 440 Hz test tone through the full pipeline.
+ * If the tone sounds clean, the FPGA path works and the mix loop is suspect.
+ * If distorted, the FPGA ring buffer or upsampler has a bug. */
+#define AUDIO_TEST_TONE 0
 
-/* ============================================
- * I_UpdateSound - Mix all active channels
- * ============================================ */
-
-void I_UpdateSound(void)
+PD_FASTTEXT void I_UpdateSound(void)
 {
-    /* Advance MUS parser based on real elapsed time (decoupled from mix rate) */
-    OPL_AdvanceMusic();
-
-    /* Drain any pending samples into the FIFO first */
-    if (submit_pending)
-        I_SubmitSound();
-
-    /* Calculate how many source samples to mix based on FIFO headroom.
-     * Target: keep FIFO near half-full (2048 of 4096 at 48 kHz).
-     * Convert FIFO deficit from 48 kHz output samples to 11 kHz source
-     * samples: src = deficit * SAMPLERATE / OUTPUT_RATE */
-    int buffered = FIFO_LEVEL(AUDIO_STATUS) + (submit_pending ? submit_remaining : 0);
-    int deficit = (int)FIFO_DEPTH / 2 - buffered;
+    int buf_lvl = BUF_LEVEL(AUDIO_STATUS);
+    int deficit = BUF_TARGET - buf_lvl;
     if (deficit <= 0)
         return;
 
-    /* Convert 48 kHz deficit to 11 kHz source samples, clamped to buffer */
-    int mix_count = (deficit * SAMPLERATE + OUTPUT_RATE - 1) / OUTPUT_RATE;
+    int mix_count = deficit;
     if (mix_count > SAMPLECOUNT)
         mix_count = SAMPLECOUNT;
     if (mix_count < 64)
-        mix_count = 64;  /* Minimum batch to amortize overhead */
+        mix_count = 64;
+
+#if AUDIO_TEST_TONE
+    /* 440 Hz square wave at 11025 Hz: period ≈ 25 samples */
+    {
+        static int tone_phase = 0;
+        int i;
+        for (i = 0; i < mix_count; i++) {
+            int16_t v = (tone_phase < 13) ? (int16_t)4000 : (int16_t)-4000;
+            AUDIO_SAMPLE = ((uint32_t)(uint16_t)v << 16) | (uint16_t)v;
+            if (++tone_phase >= 25) tone_phase = 0;
+        }
+        return;
+    }
+#endif
 
     register unsigned int sample;
     register int dl;
     register int dr;
 
-    signed short *leftout;
-    signed short *rightout;
-    signed short *leftend;
-    int step;
+    int i;
     int chan;
 
-    leftout = mixbuffer;
-    rightout = mixbuffer + 1;
-    step = 2;
-    leftend = mixbuffer + mix_count * step;
-
-    while (leftout != leftend)
+    for (i = 0; i < mix_count; i++)
     {
         dl = 0;
         dr = 0;
@@ -371,71 +353,27 @@ void I_UpdateSound(void)
             }
         }
 
-        /* Clamp to 16-bit signed range */
         if (dl > 0x7fff)
-            *leftout = 0x7fff;
+            dl = 0x7fff;
         else if (dl < -0x8000)
-            *leftout = -0x8000;
-        else
-            *leftout = dl;
+            dl = -0x8000;
 
         if (dr > 0x7fff)
-            *rightout = 0x7fff;
+            dr = 0x7fff;
         else if (dr < -0x8000)
-            *rightout = -0x8000;
-        else
-            *rightout = dr;
+            dr = -0x8000;
 
-        leftout += step;
-        rightout += step;
+        /* {R[15:0], L[15:0]} — I2S sends upper half first = right channel */
+        AUDIO_SAMPLE = ((uint32_t)(uint16_t)dr << 16) | (uint16_t)dl;
     }
-
-    /* Mark buffer ready for async submission.
-     * Upsample count = mix_count * OUTPUT_RATE / SAMPLERATE */
-    submit_src_pos = 0;
-    submit_mix_count = mix_count;
-    submit_remaining = (mix_count * OUTPUT_RATE) / SAMPLERATE;
-    submit_pending = 1;
 }
 
 /* ============================================
- * I_SubmitSound - Non-blocking upsample and push to FIFO
+ * I_SubmitSound - No-op (HW upsampler handles submission)
  * ============================================ */
 
-PD_FASTTEXT void I_SubmitSound(void)
+void I_SubmitSound(void)
 {
-    if (!submit_pending)
-        return;
-
-    /* Check how much space the FIFO has */
-    uint32_t status = AUDIO_STATUS;
-    int available = FIFO_DEPTH - FIFO_LEVEL(status);
-    if (available <= 0)
-        return;
-
-    int to_send = submit_remaining < available ? submit_remaining : available;
-
-    for (int i = 0; i < to_send; i++)
-    {
-        int idx = submit_src_pos >> 16;
-        int frac = (submit_src_pos & 0xFFFF);
-
-        if (idx >= submit_mix_count - 1)
-            idx = submit_mix_count - 2;
-
-        /* Linear interpolation: lerp between adjacent samples.
-         * Simpler than Hermite, avoids overshoot artifacts. */
-        int left  = mixbuffer[idx * 2]     + (int)(((int64_t)frac * (mixbuffer[(idx + 1) * 2]     - mixbuffer[idx * 2])) >> 16);
-        int right = mixbuffer[idx * 2 + 1] + (int)(((int64_t)frac * (mixbuffer[(idx + 1) * 2 + 1] - mixbuffer[idx * 2 + 1])) >> 16);
-
-        AUDIO_SAMPLE = ((uint32_t)(uint16_t)left << 16) | (uint16_t)right;
-
-        submit_src_pos += UPSAMPLE_STEP;
-    }
-
-    submit_remaining -= to_send;
-    if (submit_remaining <= 0)
-        submit_pending = 0;
 }
 
 /* ============================================
@@ -463,9 +401,6 @@ void I_InitSound(void)
     }
 
     printf("I_InitSound: pre-cached all sound data\n");
-
-    /* Clear mixing buffer */
-    memset(mixbuffer, 0, sizeof(mixbuffer));
 
     /* Clear channel state */
     for (i = 0; i < NUM_CHANNELS; i++)

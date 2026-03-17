@@ -113,7 +113,7 @@ void P_ExplodeMissile (mobj_t* mo)
 #define STOPSPEED               0x1000
 #define FRICTION                0xe800
 
-void P_XYMovement (mobj_t* mo)
+PD_FASTTEXT void P_XYMovement (mobj_t* mo)
 {
     fixed_t     ptryx;
     fixed_t     ptryy;
@@ -245,7 +245,7 @@ void P_XYMovement (mobj_t* mo)
 //
 // P_ZMovement
 //
-void P_ZMovement (mobj_t* mo)
+PD_FASTTEXT void P_ZMovement (mobj_t* mo)
 {
     fixed_t     dist;
     fixed_t     delta;
@@ -414,7 +414,7 @@ P_NightmareRespawn (mobj_t* mobj)
 //
 // P_MobjThinker
 //
-void P_MobjThinker (mobj_t* mobj)
+PD_FASTTEXT void P_MobjThinker (mobj_t* mobj)
 {
     // momentum movement
     if (mobj->momx

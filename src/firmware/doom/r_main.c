@@ -33,7 +33,9 @@ rcsid[] = "$Id: r_main.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 
 
 #include "doomdef.h"
+#include "doomstat.h"
 #include "d_net.h"
+#include "i_system.h"
 
 #include "m_bbox.h"
 
@@ -85,6 +87,16 @@ player_t*               viewplayer;
 
 // 0 = high, 1 = low
 int                     detailshift;
+
+//
+// Tic interpolation state — smooth 60fps view between 35Hz game tics.
+//
+static fixed_t          prev_viewx;
+static fixed_t          prev_viewy;
+static fixed_t          prev_viewz;
+static angle_t          prev_viewangle;
+static boolean          interp_valid;    // false until first snapshot
+static fixed_t          frac_tic;        // 0..FRACUNIT sub-tic position
 
 //
 // precalculated math tables
@@ -211,7 +223,7 @@ R_PointOnSide
 }
 
 
-int
+PD_FASTTEXT int
 R_PointOnSegSide
 ( fixed_t       x,
   fixed_t       y,
@@ -388,7 +400,7 @@ R_PointToAngle2
 }
 
 
-fixed_t
+PD_FASTTEXT fixed_t
 R_PointToDist
 ( fixed_t       x,
   fixed_t       y )
@@ -682,12 +694,12 @@ void R_ExecuteSetViewSize (void)
     if (setblocks == 11)
     {
         scaledviewwidth = SCREENWIDTH;
-        viewheight = SCREENHEIGHT;
+        viewheight = RENDER_HEIGHT;
     }
     else
     {
         scaledviewwidth = setblocks*32;
-        viewheight = (setblocks*(SCREENHEIGHT-32)/10)&~7;
+        viewheight = (setblocks*(RENDER_HEIGHT-32)/10)&~7;
     }
 
     detailshift = setdetail;
@@ -773,22 +785,14 @@ extern int      screenblocks;
 void R_Init (void)
 {
     R_InitData ();
-    printf ("\nR_InitData");
     R_InitPointToAngle ();
-    printf ("\nR_InitPointToAngle");
     R_InitTables ();
     // viewwidth / viewheight / detailLevel are set by the defaults
-    printf ("\nR_InitTables");
-
     R_SetViewSize (screenblocks, detailLevel);
     R_InitPlanes ();
-    printf ("\nR_InitPlanes");
     R_InitLightTables ();
-    printf ("\nR_InitLightTables");
     R_InitSkyMap ();
-    printf ("\nR_InitSkyMap");
     R_InitTranslationTables ();
-    printf ("\nR_InitTranslationsTables");
 
     framecount = 0;
 }
@@ -823,21 +827,63 @@ R_PointInSubsector
 }
 
 
+//
+// Tic interpolation helpers
+//
+void R_InterpolationSnapshot (void)
+{
+    player_t *player = &players[displayplayer];
+    if (gamestate == GS_LEVEL && player->mo)
+    {
+        prev_viewx     = player->mo->x;
+        prev_viewy     = player->mo->y;
+        prev_viewz     = player->viewz;
+        prev_viewangle = player->mo->angle;
+        interp_valid   = true;
+    }
+}
+
+void R_InterpolationSetFrac (void)
+{
+    frac_tic = I_GetTimeFrac();
+}
+
+void R_InterpolationReset (void)
+{
+    interp_valid = false;
+}
+
 
 //
 // R_SetupFrame
 //
-void R_SetupFrame (player_t* player)
+PD_FASTTEXT void R_SetupFrame (player_t* player)
 {
     int         i;
 
     viewplayer = player;
-    viewx = player->mo->x;
-    viewy = player->mo->y;
-    viewangle = player->mo->angle + viewangleoffset;
     extralight = player->extralight;
 
-    viewz = player->viewz;
+    if (interp_valid && frac_tic > 0 && !paused)
+    {
+        fixed_t ifrac = FRACUNIT - frac_tic;
+
+        viewx = FixedMul(prev_viewx, ifrac) + FixedMul(player->mo->x, frac_tic);
+        viewy = FixedMul(prev_viewy, ifrac) + FixedMul(player->mo->y, frac_tic);
+        viewz = FixedMul(prev_viewz, ifrac) + FixedMul(player->viewz, frac_tic);
+
+        angle_t cur_angle = player->mo->angle;
+        int delta = (int)(cur_angle - prev_viewangle);
+        viewangle = prev_viewangle + (angle_t)FixedMul(delta, frac_tic)
+                    + viewangleoffset;
+    }
+    else
+    {
+        viewx = player->mo->x;
+        viewy = player->mo->y;
+        viewz = player->viewz;
+        viewangle = player->mo->angle + viewangleoffset;
+    }
 
     viewsin = finesine[viewangle>>ANGLETOFINESHIFT];
     viewcos = finecosine[viewangle>>ANGLETOFINESHIFT];
@@ -867,7 +913,7 @@ void R_SetupFrame (player_t* player)
 //
 // R_RenderView
 //
-void R_RenderPlayerView (player_t* player)
+PD_FASTTEXT void R_RenderPlayerView (player_t* player)
 {
     /* Advance OPL2 music between rendering passes so notes don't
      * sustain/stutter when a complex frame takes a long time. */

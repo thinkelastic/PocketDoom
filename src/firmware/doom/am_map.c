@@ -465,7 +465,7 @@ void AM_initVariables(void)
     static event_t st_notify = { ev_keyup, AM_MSGENTERED };
 
     automapactive = true;
-    fb = screens[0];
+    fb = screens[0] + RENDER_YOFF * SCREENWIDTH;
 
     f_oldloc.x = MAXINT;
     amclock = 0;
@@ -544,7 +544,7 @@ void AM_LevelInit(void)
 
     f_x = f_y = 0;
     f_w = finit_width;
-    f_h = finit_height;
+    f_h = RENDER_HEIGHT - 32;
 
     AM_clearMarks();
 
@@ -1335,7 +1335,7 @@ void AM_Drawer (void)
 {
     if (!automapactive) return;
 
-    fb = screens[0];
+    fb = screens[0] + RENDER_YOFF * SCREENWIDTH;
     AM_clearFB(BACKGROUND);
     if (grid)
         AM_drawGrid(GRIDCOLORS);

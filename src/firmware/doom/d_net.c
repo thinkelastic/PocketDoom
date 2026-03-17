@@ -34,6 +34,7 @@ rcsid[] = "$Id: d_net.c,v 1.3 1997/02/03 22:01:47 b1 Exp $";
 #include "g_game.h"
 #include "doomdef.h"
 #include "doomstat.h"
+#include "r_main.h"
 
 #define NCMD_EXIT               0x80000000
 #define NCMD_RETRANSMIT         0x40000000
@@ -703,8 +704,8 @@ void TryRunTics (void)
     else
         counts = availabletics;
 
-    if (counts < 1)
-        counts = 1;
+    if (counts < 0)
+        counts = 0;
 
     frameon++;
 
@@ -765,6 +766,9 @@ void TryRunTics (void)
     // run the count * ticdup dics
     while (counts--)
     {
+        // Save view state before this tic advances it (for interpolation)
+        R_InterpolationSnapshot();
+
         for (i=0 ; i<ticdup ; i++)
         {
             if (gametic/ticdup > lowtic)
@@ -794,4 +798,7 @@ void TryRunTics (void)
         }
         NetUpdate ();   // check for new console commands
     }
+
+    // Compute sub-tic fraction for interpolated rendering
+    R_InterpolationSetFrac();
 }

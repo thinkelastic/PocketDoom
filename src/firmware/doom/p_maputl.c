@@ -469,7 +469,7 @@ P_SetThingPosition (mobj_t* thing)
 // to P_BlockLinesIterator, then make one or more calls
 // to it.
 //
-boolean
+PD_FASTTEXT boolean
 P_BlockLinesIterator
 ( int                   x,
   int                   y,
@@ -510,7 +510,7 @@ P_BlockLinesIterator
 //
 // P_BlockThingsIterator
 //
-boolean
+PD_FASTTEXT boolean
 P_BlockThingsIterator
 ( int                   x,
   int                   y,

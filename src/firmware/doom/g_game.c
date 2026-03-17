@@ -66,6 +66,7 @@ rcsid[] = "$Id: g_game.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 // SKY handling - still the wrong place.
 #include "r_data.h"
 #include "r_sky.h"
+#include "r_main.h"
 
 
 
@@ -469,6 +470,7 @@ void G_DoLoadLevel (void)
     }
 
     levelstarttic = gametic;        // for time calculation
+    R_InterpolationReset();         // don't interpolate across level loads
 
     if (wipegamestate == GS_LEVEL)
         wipegamestate = -1;             // force a wipe
@@ -483,6 +485,7 @@ void G_DoLoadLevel (void)
     }
 
     P_SetupLevel (gameepisode, gamemap, 0, gameskill);
+
     displayplayer = consoleplayer;              // view the guy you are playing
     starttime = I_GetTime ();
     gameaction = ga_nothing;

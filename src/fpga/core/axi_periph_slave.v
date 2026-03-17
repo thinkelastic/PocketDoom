@@ -83,11 +83,10 @@ module axi_periph_slave (
     output reg  [31:0] target_buffer_param_struct,
     output reg  [31:0] target_buffer_resp_struct,
 
-    // Audio output interface
+    // Audio output interface (ring buffer in audio_upsample)
     output reg         audio_sample_wr,
     output reg  [31:0] audio_sample_data,
-    input wire  [11:0] audio_fifo_level,
-    input wire         audio_fifo_full,
+    input wire  [9:0]  audio_buf_level,
 
     // Link MMIO interface
     output reg         link_reg_wr,
@@ -104,6 +103,18 @@ module axi_periph_slave (
 
     // Game ID from instance JSON memory_writes
     input wire  [31:0] game_id,
+
+    // Resolution setting from interact.json
+    input wire  [31:0] original_mode,
+
+    // Run Mode setting from interact.json
+    input wire  [31:0] run_mode,
+
+    // Refresh Rate setting from interact.json
+    input wire  [31:0] refresh_rate,
+
+    // VRR: firmware-written V_TOTAL (for dynamic refresh rate)
+    output reg  [9:0]  vrr_v_total,
 
     // Shutdown handshake
     input wire         shutdown_pending,
@@ -281,6 +292,7 @@ always @(posedge clk) begin
         target_buffer_param_struct <= 0;
         target_buffer_resp_struct <= 0;
         shutdown_ack <= 0;
+        vrr_v_total <= 10'd0;
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
@@ -323,6 +335,7 @@ always @(posedge clk) begin
                     end
                 end
                 6'b011011: shutdown_ack <= req_wdata[0];
+                6'b011111: vrr_v_total <= req_wdata[9:0];
                 6'b010000: pal_index_reg <= req_wdata[7:0];
                 6'b010001: begin
                     pal_wr <= 1;
@@ -371,7 +384,10 @@ always @(*) begin
         6'b011001: sysreg_rdata = {16'b0, cont2_trig_s};
         6'b011010: sysreg_rdata = game_id;
         6'b011011: sysreg_rdata = {31'b0, shutdown_pending};
-        6'b011100: sysreg_rdata = 32'h0;
+        6'b011100: sysreg_rdata = original_mode;
+        6'b011101: sysreg_rdata = run_mode;
+        6'b011110: sysreg_rdata = refresh_rate;
+        6'b011111: sysreg_rdata = {22'b0, vrr_v_total};
         default: sysreg_rdata = 32'h0;
     endcase
 end
@@ -379,8 +395,9 @@ end
 // ============================================
 // Peripheral read data mux
 // ============================================
+wire        audio_buf_full = (audio_buf_level >= 10'd512);
 wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
-                             reg_audio  ? {19'b0, audio_fifo_full, audio_fifo_level} :
+                             reg_audio  ? {19'b0, audio_buf_full, 2'b0, audio_buf_level} :
                              reg_link   ? link_reg_rdata :
                              32'h0;
 

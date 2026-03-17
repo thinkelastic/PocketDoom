@@ -88,7 +88,9 @@ rcsid[] = "$Id: st_stuff.c,v 1.6 1997/02/03 22:45:13 b1 Exp $";
 #define ST_X2                           104
 
 // Y offset to adjust hardcoded coordinates (designed for SCREENHEIGHT=200)
-#define ST_YOFF                         (SCREENHEIGHT - 200)
+// In original mode: center 200-line area in 240, so offset = 20
+// In 240 mode: push to bottom, offset = 40
+#define ST_YOFF                         (original_mode ? RENDER_YOFF : (SCREENHEIGHT - 200))
 
 #define ST_FX                   143
 #define ST_FY                   (169 + ST_YOFF)

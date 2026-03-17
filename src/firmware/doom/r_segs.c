@@ -35,6 +35,7 @@ rcsid[] = "$Id: r_segs.c,v 1.3 1997/01/29 20:10:19 b1 Exp $";
 
 #include "r_local.h"
 #include "r_sky.h"
+#include "r_data.h"
 
 
 // OPTIMIZE: closed two sided lines as single sided
@@ -280,7 +281,7 @@ PD_FASTTEXT void R_RenderSegLoop (void)
             dc_yl = yl;
             dc_yh = yh;
             dc_texturemid = rw_midtexturemid;
-            dc_source = R_GetColumn(midtexture,texturecolumn);
+            dc_source = R_CacheColumn(R_GetColumn(midtexture,texturecolumn));
             colfunc ();
             ceilingclip[rw_x] = viewheight;
             floorclip[rw_x] = -1;
@@ -302,7 +303,7 @@ PD_FASTTEXT void R_RenderSegLoop (void)
                     dc_yl = yl;
                     dc_yh = mid;
                     dc_texturemid = rw_toptexturemid;
-                    dc_source = R_GetColumn(toptexture,texturecolumn);
+                    dc_source = R_CacheColumn(R_GetColumn(toptexture,texturecolumn));
                     colfunc ();
                     ceilingclip[rw_x] = mid;
                 }
@@ -331,8 +332,8 @@ PD_FASTTEXT void R_RenderSegLoop (void)
                     dc_yl = mid;
                     dc_yh = yh;
                     dc_texturemid = rw_bottomtexturemid;
-                    dc_source = R_GetColumn(bottomtexture,
-                                            texturecolumn);
+                    dc_source = R_CacheColumn(R_GetColumn(bottomtexture,
+                                            texturecolumn));
                     colfunc ();
                     floorclip[rw_x] = mid;
                 }

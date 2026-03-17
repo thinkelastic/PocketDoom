@@ -188,7 +188,7 @@ P_TeleportMove
 // PIT_CheckLine
 // Adjusts tmfloorz and tmceilingz as lines are contacted
 //
-boolean PIT_CheckLine (line_t* ld)
+PD_FASTTEXT boolean PIT_CheckLine (line_t* ld)
 {
     if (tmbbox[BOXRIGHT] <= ld->bbox[BOXLEFT]
         || tmbbox[BOXLEFT] >= ld->bbox[BOXRIGHT]
@@ -251,7 +251,7 @@ boolean PIT_CheckLine (line_t* ld)
 //
 // PIT_CheckThing
 //
-boolean PIT_CheckThing (mobj_t* thing)
+PD_FASTTEXT boolean PIT_CheckThing (mobj_t* thing)
 {
     fixed_t             blockdist;
     boolean             solid;
@@ -373,7 +373,7 @@ boolean PIT_CheckThing (mobj_t* thing)
 //  speciallines[]
 //  numspeciallines
 //
-boolean
+PD_FASTTEXT boolean
 P_CheckPosition
 ( mobj_t*       thing,
   fixed_t       x,
@@ -449,7 +449,7 @@ P_CheckPosition
 // Attempt to move to a new position,
 // crossing special lines unless MF_TELEPORT is set.
 //
-boolean
+PD_FASTTEXT boolean
 P_TryMove
 ( mobj_t*       thing,
   fixed_t       x,

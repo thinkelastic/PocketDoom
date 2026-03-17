@@ -63,6 +63,7 @@ void R_ClearDrawSegs (void);
 
 
 void R_RenderBSPNode (int bspnum);
+int  R_SolidSegsOccluded (int x1, int x2);
 
 
 #endif

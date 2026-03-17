@@ -215,7 +215,7 @@ void R_ClearPlanes (void)
 //
 // R_FindPlane
 //
-visplane_t*
+PD_FASTTEXT visplane_t*
 R_FindPlane
 ( fixed_t       height,
   int           picnum,
@@ -263,7 +263,7 @@ R_FindPlane
 //
 // R_CheckPlane
 //
-visplane_t*
+PD_FASTTEXT visplane_t*
 R_CheckPlane
 ( visplane_t*   pl,
   int           start,

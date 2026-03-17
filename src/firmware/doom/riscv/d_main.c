@@ -236,12 +236,12 @@ void D_Display (void)
             break;
         if (automapactive)
             AM_Drawer ();
-        if (wipe || (viewheight != SCREENHEIGHT && fullscreen) )
+        if (wipe || (viewheight != RENDER_HEIGHT && fullscreen) )
             redrawsbar = true;
         if (inhelpscreensstate && !inhelpscreens)
             redrawsbar = true;              // just put away the help screen
-        ST_Drawer (viewheight == SCREENHEIGHT, redrawsbar );
-        fullscreen = viewheight == SCREENHEIGHT;
+        ST_Drawer (viewheight == RENDER_HEIGHT, redrawsbar );
+        fullscreen = viewheight == RENDER_HEIGHT;
         break;
 
       case GS_INTERMISSION:
@@ -313,6 +313,9 @@ void D_Display (void)
     NetUpdate ();         // send out any new accumulation
 
 
+    // Black bars in original mode are cleared via uncached SDRAM writes
+    // in I_FinishUpdate (after the cache flush) — zero cache overhead.
+
     // normal update
     if (!wipe)
     {
@@ -370,6 +373,7 @@ void D_DoomLoop (void)
             G_BuildTiccmd (&netcmds[consoleplayer][maketic%BACKUPTICS]);
             if (advancedemo)
                 D_DoAdvanceDemo ();
+            R_InterpolationSnapshot ();
             M_Ticker ();
             G_Ticker ();
             gametic++;
@@ -377,7 +381,7 @@ void D_DoomLoop (void)
         }
         else
         {
-            TryRunTics (); // will run at least one tic
+            TryRunTics (); // will run zero or more tics
         }
 
         S_UpdateSounds (players[consoleplayer].mo);// move positional sounds
@@ -387,8 +391,6 @@ void D_DoomLoop (void)
 
         // Sound mixing for the buffer is synchronous.
         I_UpdateSound();
-        // Update sound output.
-        I_SubmitSound();
     }
 }
 
@@ -612,23 +614,22 @@ void D_DoomMain (void)
     startmap     = 1;
     autostart    = false;
 
-    /* Custom title */
     printf ( "----------------------------\n"
              "RISC-V DOOM Startup v%i.%i\n"
              "----------------------------\n",
              VERSION/100,VERSION%100);
 
     // init subsystems
-    printf ("V_Init: allocate screens.\n");
+    printf ("V_Init: Allocate screens.\n");
     V_Init ();
 
     printf ("M_LoadDefaults: Load system defaults.\n");
     M_LoadDefaults ();              // load before initing other systems
 
-    printf ("Z_Init: Init zone memory allocation daemon. \n");
+    printf ("Z_Init: Init zone memory allocation.\n");
     Z_Init ();
 
-    printf ("W_Init: Init WADfiles.\n");
+    printf ("W_Init: Init WAD files.\n");
     W_InitMultipleFiles (wadfiles);
 
     // Auto-detect game mode from WAD contents now that lumps are loaded
@@ -646,10 +647,10 @@ void D_DoomMain (void)
     printf ("M_Init: Init miscellaneous info.\n");
     M_Init ();
 
-    printf ("R_Init: Init DOOM.");
+    printf ("R_Init: Init DOOM refresh.\n");
     R_Init ();
 
-    printf ("\nP_Init: Init Playloop state.\n");
+    printf ("P_Init: Init playloop state.\n");
     P_Init ();
 
     printf ("I_Init: Setting up machine state.\n");

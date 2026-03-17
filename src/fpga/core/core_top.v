@@ -210,6 +210,37 @@ assign bridge_endian_little = 1;
 reg [31:0] analogizer_settings;
 //wire [31:0] analogizer_settings_s;
 
+// Resolution setting from interact.json (bridge 0xF700000C)
+reg [31:0] original_mode_74a;
+reg [31:0] original_mode_sync1, original_mode_sync2;
+always @(posedge clk_cpu) begin
+    original_mode_sync1 <= original_mode_74a;
+    original_mode_sync2 <= original_mode_sync1;
+end
+
+// Run Mode setting from interact.json (bridge 0xF7000014)
+reg [31:0] run_mode_74a;
+reg [31:0] run_mode_sync1, run_mode_sync2;
+always @(posedge clk_cpu) begin
+    run_mode_sync1 <= run_mode_74a;
+    run_mode_sync2 <= run_mode_sync1;
+end
+
+// Refresh Rate setting from interact.json (bridge 0xF7000018)
+reg [31:0] refresh_rate_74a;
+// CDC into video clock domain (for V_TOTAL control)
+reg [31:0] refresh_rate_vid_sync1, refresh_rate_vid_sync2;
+always @(posedge clk_core_12288) begin
+    refresh_rate_vid_sync1 <= refresh_rate_74a;
+    refresh_rate_vid_sync2 <= refresh_rate_vid_sync1;
+end
+// CDC into CPU clock domain (for firmware MMIO readback)
+reg [31:0] refresh_rate_cpu_sync1, refresh_rate_cpu_sync2;
+always @(posedge clk_cpu) begin
+    refresh_rate_cpu_sync1 <= refresh_rate_74a;
+    refresh_rate_cpu_sync2 <= refresh_rate_cpu_sync1;
+end
+
 // Game ID from instance JSON memory_writes (bridge 0xF7000010)
 reg [31:0] game_id_74a;
 reg [31:0] game_id_sync1, game_id_sync2;
@@ -666,8 +697,21 @@ wire        psram_mux_rdata_valid;
 // Audio output interface
 wire        audio_sample_wr;
 wire [31:0] audio_sample_data;
+wire [9:0]  audio_buf_level;
+// Upsampler → audio_output FIFO bridge
+wire        audio_up_wr;
+wire [31:0] audio_up_data;
 wire [11:0] audio_fifo_level;
 wire        audio_fifo_full;
+
+// VRR: firmware-written V_TOTAL
+wire [9:0] vrr_v_total;
+// CDC vrr_v_total (clk_cpu) → clk_core_12288 (video timing)
+reg [9:0] vrr_vt_sync1, vrr_vt_sync2;
+always @(posedge clk_core_12288) begin
+    vrr_vt_sync1 <= vrr_v_total;
+    vrr_vt_sync2 <= vrr_vt_sync1;
+end
 
 // OPL2 hardware interface
 wire        opl_write_req;
@@ -775,9 +819,18 @@ always @(*) begin
         //the byte order is inverted because the bridge_endian_little = 1
         bridge_rd_data <= {signed_hoff[7:0],signed_hoff[15:8],signed_hoff[23:16],signed_hoff[31:24]}; //signed_hoff;
         end
-        32'hF7000008: begin 
+        32'hF7000008: begin
         //the byte order is inverted because the bridge_endian_little = 1
         bridge_rd_data <= {signed_voff[7:0],signed_voff[15:8],signed_voff[23:16],signed_voff[31:24]}; //signed_voff;
+        end
+        32'hF700000C: begin
+        bridge_rd_data <= {original_mode_74a[7:0],original_mode_74a[15:8],original_mode_74a[23:16],original_mode_74a[31:24]};
+        end
+        32'hF7000014: begin
+        bridge_rd_data <= {run_mode_74a[7:0],run_mode_74a[15:8],run_mode_74a[23:16],run_mode_74a[31:24]};
+        end
+        32'hF7000018: begin
+        bridge_rd_data <= {refresh_rate_74a[7:0],refresh_rate_74a[15:8],refresh_rate_74a[23:16],refresh_rate_74a[31:24]};
         end
 
         32'hF8xxxxxx: begin
@@ -808,7 +861,25 @@ always @(posedge clk_74a) begin
         bridge_wr_data[23:16],
         bridge_wr_data[31:24]};
 
+        32'hF700000C: original_mode_74a <= {
+        bridge_wr_data[7:0],
+        bridge_wr_data[15:8],
+        bridge_wr_data[23:16],
+        bridge_wr_data[31:24]};
+
+        32'hF7000014: run_mode_74a <= {
+        bridge_wr_data[7:0],
+        bridge_wr_data[15:8],
+        bridge_wr_data[23:16],
+        bridge_wr_data[31:24]};
+
         32'hF7000010: game_id_74a <= {
+        bridge_wr_data[7:0],
+        bridge_wr_data[15:8],
+        bridge_wr_data[23:16],
+        bridge_wr_data[31:24]};
+
+        32'hF7000018: refresh_rate_74a <= {
         bridge_wr_data[7:0],
         bridge_wr_data[15:8],
         bridge_wr_data[23:16],
@@ -1775,8 +1846,7 @@ assign video_hs = vidout_hs;
         // Audio output interface
         .audio_sample_wr(audio_sample_wr),
         .audio_sample_data(audio_sample_data),
-        .audio_fifo_level(audio_fifo_level),
-        .audio_fifo_full(audio_fifo_full),
+        .audio_buf_level(audio_buf_level),
         // Link MMIO interface
         .link_reg_wr(link_reg_wr),
         .link_reg_rd(link_reg_rd),
@@ -1789,6 +1859,10 @@ assign video_hs = vidout_hs;
         .opl_write_data(opl_write_data),
         .opl_ack(opl_ack),
         .game_id(game_id_sync2),
+        .original_mode(original_mode_sync2),
+        .run_mode(run_mode_sync2),
+        .refresh_rate(refresh_rate_cpu_sync2),
+        .vrr_v_total(vrr_v_total),
         .shutdown_pending(shutdown_pending_cpu),
         .shutdown_ack(shutdown_ack_cpu)
     );
@@ -2008,7 +2082,7 @@ assign video_hs = vidout_hs;
         .clk(clk_core_12288),
         .clk_cpu(clk_cpu),
         .reset_n(reset_n),
-        .pixel_x({visible_x[9],visible_x[9:1]}), //RndMnkIII: For CRT I doubled the x resolution
+        .pixel_x({1'b0,visible_x[9:1]}), // halve x resolution (zero-extend)
         .pixel_y(visible_y),
         .pixel_color(terminal_pixel_color),
         .mem_valid(term_mem_valid),
@@ -2063,12 +2137,30 @@ assign video_hs = vidout_hs;
         .pal_data(cpu_pal_data)
     );
 
-        // ---  CRT 15.7kHz / 60Hz Parameters ---
-    localparam CRT_V_TOTAL  = CRT_V_SYNC + CRT_V_BPORCH + CRT_V_ACTIVE + CRT_V_FPORCH;
+        // ---  CRT 15.7kHz / variable Hz Parameters ---
     localparam CRT_V_SYNC   = 3;
-    localparam CRT_V_BPORCH = 15; //15;
-    localparam CRT_V_FPORCH = 4; //4;
+    localparam CRT_V_BPORCH = 15;
+    localparam CRT_V_FPORCH = 4;
     localparam CRT_V_ACTIVE = 240;
+    localparam CRT_V_TOTAL_60 = CRT_V_SYNC + CRT_V_BPORCH + CRT_V_ACTIVE + CRT_V_FPORCH; // 262
+
+    // Dynamic V_TOTAL for refresh rate control (applied at frame boundary)
+    // Presets: 60 Hz=262, 55 Hz=286, 50 Hz=315
+    // VRR: firmware writes V_TOTAL directly via MMIO
+    reg [9:0] crt_v_total;
+
+    wire [9:0] crt_v_total_preset =
+        (refresh_rate_vid_sync2[1:0] == 2'd2) ? 10'd315 :  // 50 Hz
+        (refresh_rate_vid_sync2[1:0] == 2'd1) ? 10'd286 :  // 55 Hz
+                                                 10'd262;   // 60 Hz (default)
+
+    // VRR mode (setting 3): use firmware-written V_TOTAL, hard clamp to safe range.
+    // Outside [254,335] the Pocket scaler loses sync — never allow it.
+    wire vrr_active = (refresh_rate_vid_sync2[1:0] == 2'd3);
+    wire [9:0] vrr_vt_safe = (vrr_vt_sync2 < 10'd262) ? 10'd262 :
+                              (vrr_vt_sync2 > 10'd335) ? 10'd335 :
+                              (vrr_vt_sync2 == 10'd0)  ? 10'd262 : vrr_vt_sync2;
+    wire [9:0] crt_v_total_next = vrr_active ? vrr_vt_safe : crt_v_total_preset;
     localparam CRT_H_TOTAL  = CRT_H_SYNC + CRT_H_BPORCH + CRT_H_ACTIVE + CRT_H_FPORCH;
     localparam CRT_H_SYNC   = 58;
     localparam CRT_H_BPORCH = 62;
@@ -2086,6 +2178,7 @@ always @(posedge clk_core_12288 or negedge reset_n) begin
 
         x_count <= 0;
         y_count <= 0;
+        crt_v_total <= CRT_V_TOTAL_60;
 
     end else begin
         vidout_de <= 0;
@@ -2102,8 +2195,9 @@ always @(posedge clk_core_12288 or negedge reset_n) begin
             x_count <= 0;
 
             y_count <= y_count + 1'b1;
-            if(y_count == CRT_V_TOTAL-1) begin
+            if(y_count == crt_v_total-1) begin
                 y_count <= 0;
+                crt_v_total <= crt_v_total_next; // latch new V_TOTAL at frame boundary
             end
         end
 
@@ -2201,15 +2295,32 @@ opl2_wrapper opl2 (
 );
 
 //
-// Audio output (FIFO + I2S) with OPL2 mixing
+// Hardware audio upsampler (BRAM ring buffer + 11 kHz → 48 kHz interpolation)
+// Single-clock (clk_sys), outputs 48 kHz samples to audio_output FIFO
+//
+audio_upsample audio_up (
+    .clk          (clk_cpu),
+    .reset_n      (reset_n),
+
+    .sample_wr    (audio_sample_wr),
+    .sample_data  (audio_sample_data),
+    .buf_level    (audio_buf_level),
+
+    .out_wr       (audio_up_wr),
+    .out_data     (audio_up_data),
+    .out_full     (audio_fifo_full)
+);
+
+//
+// Audio output (dcfifo + I2S) with OPL2 mixing
 //
 audio_output audio_out (
     .clk_sys      (clk_cpu),
     .clk_audio    (clk_core_12288),
     .reset_n      (reset_n),
 
-    .sample_wr    (audio_sample_wr),
-    .sample_data  (audio_sample_data),
+    .sample_wr    (audio_up_wr),
+    .sample_data  (audio_up_data),
     .fifo_level   (audio_fifo_level),
     .fifo_full    (audio_fifo_full),
 
@@ -2245,8 +2356,6 @@ mf_pllbase mp1 (
     .outclk_1       ( clk_core_12288_90deg ),
 
     .outclk_2       ( clk_core_49152),
-    .outclk_3       ( ),
-    .outclk_4       ( ),
 
     .locked         ( pll_core_locked )
 );

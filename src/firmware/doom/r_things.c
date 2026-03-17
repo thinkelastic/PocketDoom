@@ -38,13 +38,14 @@ rcsid[] = "$Id: r_things.c,v 1.5 1997/02/03 16:47:56 b1 Exp $";
 #include "w_wad.h"
 
 #include "r_local.h"
+#include "r_bsp.h"
 
 #include "doomstat.h"
 
 
 
 #define MINZ                            (FRACUNIT*4)
-#define BASEYCENTER                     (100 - (SCREENHEIGHT - 200) / 2)
+#define BASEYCENTER                     (original_mode ? 100 : (100 - (SCREENHEIGHT - 200) / 2))
 
 //void R_DrawColumn (void);
 //void R_DrawFuzzColumn (void);
@@ -325,7 +326,7 @@ void R_ClearSprites (void)
 //
 vissprite_t     overflowsprite;
 
-vissprite_t* R_NewVisSprite (void)
+PD_FASTTEXT vissprite_t* R_NewVisSprite (void)
 {
     if (vissprite_p == &vissprites[MAXVISSPRITES])
         return &overflowsprite;
@@ -393,7 +394,7 @@ PD_FASTTEXT void R_DrawMaskedColumn (column_t* column)
 // R_DrawVisSprite
 //  mfloorclip and mceilingclip should also be set.
 //
-void
+PD_FASTTEXT void
 R_DrawVisSprite
 ( vissprite_t*          vis,
   int                   x1,
@@ -449,7 +450,7 @@ R_DrawVisSprite
 // Generates a vissprite for a thing
 //  if it might be visible.
 //
-void R_ProjectSprite (mobj_t* thing)
+PD_FASTTEXT void R_ProjectSprite (mobj_t* thing)
 {
     fixed_t             tr_x;
     fixed_t             tr_y;
@@ -478,6 +479,11 @@ void R_ProjectSprite (mobj_t* thing)
 
     angle_t             ang;
     fixed_t             iscale;
+
+    // Don't render the player's own sprite — with tic interpolation
+    // the camera may lag behind the mobj, making it visible.
+    if (thing == viewplayer->mo)
+        return;
 
     // transform the origin point
     tr_x = thing->x - viewx;
@@ -546,6 +552,14 @@ void R_ProjectSprite (mobj_t* thing)
     if (x2 < 0)
         return;
 
+    // Early rejection: skip if fully behind solid walls
+    {
+        int sx1 = x1 < 0 ? 0 : x1;
+        int sx2 = x2 >= viewwidth ? viewwidth - 1 : x2;
+        if (R_SolidSegsOccluded(sx1, sx2))
+            return;
+    }
+
     // store information in a vissprite
     vis = R_NewVisSprite ();
     vis->mobjflags = thing->flags;
@@ -610,7 +624,7 @@ void R_ProjectSprite (mobj_t* thing)
 // R_AddSprites
 // During BSP traversal, this adds sprites by sector.
 //
-void R_AddSprites (sector_t* sec)
+PD_FASTTEXT void R_AddSprites (sector_t* sec)
 {
     mobj_t*             thing;
     int                 lightnum;
@@ -784,7 +798,7 @@ void R_DrawPlayerSprites (void)
 vissprite_t     vsprsortedhead;
 
 
-void R_SortVisSprites (void)
+PD_FASTTEXT void R_SortVisSprites (void)
 {
     int                 i;
     int                 count;

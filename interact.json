@@ -1,93 +1,165 @@
 {
   "interact": {
-      "magic": "APF_VER_1",
-      "variables": [
-        {
-            "name": "Enable Analogizer",
-            "id": 20,
-            "type": "list",
-            "enabled": true,
-            "persist": true,
-            "address": "0xF7000000",
-            "defaultval": 0,
-            "mask": "0xFFFF7FFF",
-            "options": [
-                {
-                    "name": "Off",
-                    "value": "0x00000000"
-                },
-                {
-                    "name": "On",
-                    "value": "0x00008000"
-                }
-            ]
-        },
-        {
-          "name": "SNAC Adapter",
-          "id": 40,
-          "type": "list",
-          "enabled": true,
-          "persist": true,
-          "address": "0xF7000000",
-          "defaultval": "0x00",
-          "mask": "0xFFFFFFE0",
-          "options": [
-            {
+    "magic": "APF_VER_1",
+    "variables": [
+      {
+        "name": "Resolution",
+        "id": 10,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "address": "0xF700000C",
+        "defaultval": "0x00",
+        "mask": "0xFFFFFFFE",
+        "options": [
+          {
+            "name": "320x240",
+            "value": "0x00000000"
+          },
+          {
+            "name": "320x200",
+            "value": "0x00000001"
+          }
+        ]
+      },
+      {
+        "name": "Refresh Rate",
+        "id": 14,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "address": "0xF7000018",
+        "defaultval": "0x00",
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "name": "60 Hz",
+            "value": "0x00000000"
+          },
+          {
+            "name": "55 Hz",
+            "value": "0x00000001"
+          },
+          {
+            "name": "50 Hz",
+            "value": "0x00000002"
+          },
+          {
+            "name": "VRR (47-62 Hz)",
+            "value": "0x00000003"
+          }
+        ]
+      },
+      {
+        "name": "Run Mode",
+        "id": 12,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "address": "0xF7000014",
+        "defaultval": "0x00",
+        "mask": "0xFFFFFFFC",
+        "options": [
+          {
+            "name": "Always Run",
+            "value": "0x00000000"
+          },
+          {
+            "name": "Use = Use + Run",
+            "value": "0x00000001"
+          },
+          {
+            "name": "Double-Tap to Run",
+            "value": "0x00000002"
+          }
+        ]
+      },
+      {
+        "name": "Enable Analogizer",
+        "id": 20,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "address": "0xF7000000",
+        "defaultval": 0,
+        "mask": "0xFFFF7FFF",
+        "options": [
+          {
+            "name": "Off",
+            "value": "0x00000000"
+          },
+          {
+            "name": "On",
+            "value": "0x00008000"
+          }
+        ]
+      },
+      {
+        "name": "SNAC Adapter",
+        "id": 40,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "address": "0xF7000000",
+        "defaultval": "0x00",
+        "mask": "0xFFFFFFE0",
+        "options": [
+          {
             "value": "0x00",
             "name": "None"
-            },
-            {
+          },
+          {
             "value": "0x03",
             "name": "SNES"
-            },
-            {
-              "value": "0x0B",
-              "name": "SNES A,B<->X,Y"
-            },
-            {
-              "value": "0x11",
-              "name": "PSX (Digital DPAD)"
-            },
-            {
-              "value": "0x13",
-              "name": "PSX (Analog DPAD)"
-            }
-          ]
-        },
-        {
-          "name": "SNAC Controller Assignment",
-          "id": 50,
-          "type": "list",
-          "enabled": true,
-          "persist": true,
-          "address": "0xF7000000",
-          "defaultval": "0x00",
-          "mask": "0xFFFFFC3F",
-          "options": [
-            {
-              "value": "0x0",
-              "name": "SNAC -> P1"
-            },
-            {
-              "value": "0x40",
-              "name": "SNAC -> P2"
-            },
-            {
-              "value": "0x80",
-              "name": "SNAC P1,P2->P1,P2"
-            }
-          ]
-        },
-        {
-          "name": "Analogizer Video Out",
-          "id": 60,
-          "type": "list",
-          "enabled": true,
-          "persist": true,
-          "address": "0xF7000000",
-          "defaultval": "0x0",
-          "mask": "0xFFFFC3FF",
-          "options": [
+          },
+          {
+            "value": "0x0B",
+            "name": "SNES A,B<->X,Y"
+          },
+          {
+            "value": "0x11",
+            "name": "PSX (Digital DPAD)"
+          },
+          {
+            "value": "0x13",
+            "name": "PSX (Analog DPAD)"
+          }
+        ]
+      },
+      {
+        "name": "SNAC Controller Assignment",
+        "id": 50,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "address": "0xF7000000",
+        "defaultval": "0x00",
+        "mask": "0xFFFFFC3F",
+        "options": [
+          {
+            "value": "0x0",
+            "name": "SNAC -> P1"
+          },
+          {
+            "value": "0x40",
+            "name": "SNAC -> P2"
+          },
+          {
+            "value": "0x80",
+            "name": "SNAC P1,P2->P1,P2"
+          }
+        ]
+      },
+      {
+        "name": "Analogizer Video Out",
+        "id": 60,
+        "type": "list",
+        "enabled": true,
+        "persist": true,
+        "address": "0xF7000000",
+        "defaultval": "0x0",
+        "mask": "0xFFFFC3FF",
+        "options": [
           {
             "value": "0x0",
             "name": "RGBS"
@@ -113,12 +185,12 @@
             "name": "SC 0% RGBHV"
           },
           {
-              "value": "0x1800",
-              "name": "SC 50% RGBHV"
+            "value": "0x1800",
+            "name": "SC 50% RGBHV"
           },
           {
-              "value": "0x1C00",
-              "name": "SC HQ2x RGBHV"
+            "value": "0x1C00",
+            "name": "SC HQ2x RGBHV"
           },
           {
             "value": "0x2000",
@@ -131,7 +203,8 @@
           {
             "value": "0x2800",
             "name": "YPbPr,Pocket OFF"
-          },            {
+          },
+          {
             "value": "0x2C00",
             "name": "Y/C NTSC,Pocket OFF"
           },
@@ -144,12 +217,12 @@
             "name": "SC 0% SC,Pocket OFF"
           },
           {
-              "value": "0x3800",
-              "name": "SC 50% RGBHV,Pocket OFF"
+            "value": "0x3800",
+            "name": "SC 50% RGBHV,Pocket OFF"
           },
           {
-              "value": "0x3C00",
-              "name": "SC HQ2x RGBHV,Pocket OFF"
+            "value": "0x3C00",
+            "name": "SC HQ2x RGBHV,Pocket OFF"
           }
         ]
       },
@@ -186,6 +259,6 @@
         }
       }
     ],
-  "messages": []
+    "messages": []
   }
 }

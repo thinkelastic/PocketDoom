@@ -50,7 +50,7 @@ ceiling_t*      activeceilings[MAXCEILINGS];
 // T_MoveCeiling
 //
 
-void T_MoveCeiling (ceiling_t* ceiling)
+PD_FASTTEXT void T_MoveCeiling (ceiling_t* ceiling)
 {
     result_e    res;
 

@@ -124,7 +124,12 @@ typedef enum
 #define SCREENHEIGHT 240
 //(int)(SCREEN_MUL*BASE_WIDTH*INV_ASPECT_RATIO) //200
 
+// Original Mode: render game at 320x200 centered in 320x240, 35fps
+extern int original_mode;
 
+// Effective render height / vertical offset for game rendering
+#define RENDER_HEIGHT    (original_mode ? 200 : SCREENHEIGHT)
+#define RENDER_YOFF      ((SCREENHEIGHT - RENDER_HEIGHT) / 2)
 
 
 // The maximum number of players, multiplayer/networking.

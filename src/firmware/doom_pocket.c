@@ -25,8 +25,11 @@
 #include "i_video.h"
 #include "v_video.h"
 
-/* From doom_sound.c — non-blocking audio FIFO drain */
-extern void I_SubmitSound(void);
+/* From doom_music.c — advance MUS parser (does OPL MMIO writes) */
+extern void OPL_AdvanceMusic(void);
+
+/* From doom_sound.c — mix and fill ring buffer */
+extern void I_UpdateSound(void);
 
 
 /* ============================================
@@ -47,6 +50,19 @@ extern void I_SubmitSound(void);
 #define SYS_CONT1_JOY       (*(volatile uint32_t *)(SYS_BASE + 0x54))
 #define SYS_CONT1_TRIG      (*(volatile uint32_t *)(SYS_BASE + 0x58))
 #define SYS_SHUTDOWN        (*(volatile uint32_t *)(SYS_BASE + 0x6C))
+#define SYS_ORIGINAL_MODE   (*(volatile uint32_t *)(SYS_BASE + 0x70))
+#define SYS_RUN_MODE        (*(volatile uint32_t *)(SYS_BASE + 0x74))
+#define SYS_REFRESH_RATE    (*(volatile uint32_t *)(SYS_BASE + 0x78))
+#define SYS_V_TOTAL         (*(volatile uint32_t *)(SYS_BASE + 0x7C))
+
+/* VRR limits: 47-62 Hz at 12.288 MHz pixel clock, H_TOTAL=780 */
+#define VRR_V_MIN   262   /* 60 Hz */
+#define VRR_V_MAX   335   /* 47 Hz */
+
+/* Run mode values */
+#define RUN_MODE_ALWAYS     0   /* Always run (default) */
+#define RUN_MODE_USE_RUN    1   /* Use button also triggers run */
+#define RUN_MODE_DOUBLETAP  2   /* Double-tap forward to run */
 
 
 /* SDRAM framebuffer addresses (CPU byte addresses) */
@@ -62,8 +78,8 @@ extern void I_SubmitSound(void);
 /* Convert SDRAM word address from register to CPU byte address */
 #define FB_REG_TO_CPU(reg)  (SDRAM_BASE + ((reg) << 1))
 
-/* Cache eviction region: 128KB of SDRAM not used by framebuffers or game data.
- * Reading this forces the 64KB 2-way D-cache to evict all dirty FB lines. */
+/* Cache eviction region: reading contiguous SDRAM forces the 128KB 2-way
+ * D-cache to evict all dirty lines.  128KB fills both ways of every set. */
 #define CACHE_FLUSH_ADDR    0x10380000
 #define CACHE_FLUSH_SIZE    (128 * 1024)
 
@@ -71,6 +87,13 @@ extern void I_SubmitSound(void);
 #define CPU_HZ              100000000
 #define TICRATE             35
 #define CYCLES_PER_TIC      (CPU_HZ / TICRATE)
+
+/* Precomputed reciprocal for tic accumulator (16.16 fixed-point):
+ * (1 << 48) / CYCLES_PER_TIC.  Multiply by dt then >> 16 to get
+ * the same result as (dt << 32) / CYCLES_PER_TIC, avoiding the
+ * expensive 64-bit software division on rv32.
+ * Value: 281474976710656 / 2857142 = 98,517,999 */
+#define TIC_RECIP_48        ((uint64_t)((((uint64_t)1 << 48) + CYCLES_PER_TIC - 1) / CYCLES_PER_TIC))
 
 /* Analogue Pocket controller button bits (active high) */
 #define PAD_DPAD_UP         (1 << 0)
@@ -96,6 +119,12 @@ extern void I_SubmitSound(void);
  * Entry point (called by bootloader)
  * ============================================ */
 
+/* Original Mode global — set from interact.json Core Option */
+int original_mode = 0;
+
+/* Run Mode global — set from interact.json Core Option */
+static int run_mode = RUN_MODE_ALWAYS;
+
 /* Linker symbols for heap region */
 extern char _heap_start[], _heap_end[];
 
@@ -113,6 +142,10 @@ void doom_main(void)
 
 void I_InitGraphics(void)
 {
+    /* Read settings from interact.json Core Options */
+    original_mode = (SYS_ORIGINAL_MODE != 0) ? 1 : 0;
+    run_mode = SYS_RUN_MODE;
+
     /* Set default gamma */
     usegamma = 1;
 
@@ -158,12 +191,26 @@ PD_FASTTEXT void I_FinishUpdate(void)
      * Doom has already rendered into it.  Force D-cache writeback by reading
      * 128KB of unrelated SDRAM — this evicts all dirty FB lines from the
      * 64KB 2-way D-cache, flushing them to physical SDRAM where the video
-     * scanout can read them. */
+     * scanout can read them.
+     *
+     * Only one read per cache line is needed to trigger a fill (and evict
+     * the old dirty line).  Stride by 32 bytes (minimum RISC-V D-cache
+     * line size) so we do ~4096 SDRAM reads instead of ~32768.  The
+     * ~28K redundant same-line hits were pure overhead (~1.5ms saved).
+     *
+     * Stride by 64 bytes (16 words) — matches VexiiRiscv's 64-byte
+     * D-cache line size.  2048 reads instead of 4096. */
     volatile uint32_t *flush = (volatile uint32_t *)CACHE_FLUSH_ADDR;
-    volatile uint32_t sink;
-    for (int i = 0; i < (int)(CACHE_FLUSH_SIZE / 4); i++)
-        sink = flush[i];
+    uint32_t sink;
+    for (int i = 0; i < (int)(CACHE_FLUSH_SIZE / 64); i++)
+        sink = flush[i * 16];
     (void)sink;
+
+    /* Black bars in original mode (320x200) are cleared once on mode
+     * switch (I_StartFrame).  Nothing renders into y < RENDER_YOFF or
+     * y >= RENDER_YOFF + 200: the renderer starts at RENDER_YOFF,
+     * HUD messages are offset by RENDER_YOFF, and menus trigger a
+     * bar re-clear on state change.  No per-frame clearing needed. */
 
     /* Request buffer swap on next vsync.  I_StartFrame() at the top
      * of the game loop waits for this swap to complete before any
@@ -202,10 +249,50 @@ void I_Init(void)
 
 byte *I_ZoneBase(int *size)
 {
-    /* Give 6MB to Doom's zone allocator */
-    *size = 6 * 1024 * 1024;
+    /* Give Doom's zone allocator as much heap as possible.
+     * Heap runs from __doom_bss_end to the stack bottom (~54MB).
+     * Leave 1MB headroom for malloc overhead and other allocations. */
+    int available = (_heap_end - _heap_start) - (1024 * 1024);
+    if (available < 6 * 1024 * 1024)
+        available = 6 * 1024 * 1024;  /* Minimum 6MB fallback */
+    *size = available;
     return (byte *)malloc(*size);
 }
+
+/* ============================================
+ * Vsync-locked tic accumulator
+ *
+ * Doom's game logic runs at 35 Hz while the display refreshes at 60 Hz.
+ *
+ * Previously I_GetTime derived tics from the free-running CPU cycle
+ * counter.  Because the CPU clock and video clock come from different
+ * PLL outputs, there is a tiny frequency mismatch.  This causes the
+ * tic/frame phase to slowly drift: every few seconds a tic boundary
+ * lands right on a frame boundary, giving one frame an extra tic of
+ * game-logic work that pushes it past the 16.67 ms vsync deadline —
+ * visible as a periodic micro-stutter.
+ *
+ * Fix: at each vsync, measure elapsed CPU cycles and accumulate
+ * fractional tics (dt / CYCLES_PER_TIC) in 32.32 fixed-point.
+ * This preserves the original game speed (set by CPU_HZ / TICRATE)
+ * while guaranteeing tic boundaries always fall on a vsync.
+ * ============================================ */
+
+/* Vsync-locked tic accumulator (32.32 fixed-point).
+ *
+ * Each vsync, I_StartFrame measures the elapsed CPU cycles and adds
+ * frame_cycles / CYCLES_PER_TIC to this accumulator.  The integer
+ * part is the tic count returned by I_GetTime; the fractional part
+ * drives I_GetTimeFrac for smooth interpolation.
+ *
+ * This preserves the original game speed (determined by CPU_HZ and
+ * TICRATE) while guaranteeing that tic boundaries always fall exactly
+ * on a vsync — eliminating the slow phase drift between the CPU
+ * cycle counter and the video clock that caused periodic stutters. */
+static uint64_t tic_accum = 0;         /* 32.32 fixed-point total tics */
+static uint32_t last_vsync_cycles = 0; /* Cycle counter at previous vsync */
+static uint32_t smooth_dt = 0;         /* EMA-smoothed vsync period (cycles) */
+
 
 int I_GetTime(void)
 {
@@ -215,11 +302,16 @@ int I_GetTime(void)
         while (1) {}        /* halt — hardware reset follows */
     }
 
-    /* Read 64-bit cycle counter, convert to 35 Hz tics */
-    uint32_t lo = SYS_CYCLE_LO;
-    uint32_t hi = SYS_CYCLE_HI;
-    uint64_t cycles = ((uint64_t)hi << 32) | lo;
-    return (int)(cycles / CYCLES_PER_TIC);
+    /* Integer part of the accumulated tics */
+    return (int)(tic_accum >> 32);
+}
+
+int I_GetTimeFrac(void)
+{
+    /* Fractional part of tic_accum → 0..FRACUNIT.
+     * Gives smooth sub-tic position locked to vsync timing. */
+    uint32_t frac32 = (uint32_t)tic_accum;   /* low 32 bits = 0.32 fraction */
+    return (int)(frac32 >> (32 - FRACBITS));  /* convert to 0.16 */
 }
 
 /* Controller state tracking */
@@ -234,10 +326,10 @@ static const struct {
     { PAD_DPAD_DOWN,    KEY_DOWNARROW },
     { PAD_DPAD_LEFT,    KEY_LEFTARROW },
     { PAD_DPAD_RIGHT,   KEY_RIGHTARROW },
-    { PAD_FACE_A,       KEY_RCTRL },    /* Fire (right) */
-    { PAD_FACE_B,       ' ' },          /* Use / Open (down) */
-    { PAD_FACE_X,       KEY_WPNUP },   /* Weapon up (top) */
-    { PAD_FACE_Y,       KEY_WPNDOWN }, /* Weapon down (left) */
+    { PAD_FACE_A,       KEY_RCTRL },    /* Fire */
+    { PAD_FACE_B,       ' ' },          /* Use / Open */
+    { PAD_FACE_X,       KEY_WPNUP },   /* Next Weapon */
+    { PAD_FACE_Y,       KEY_WPNDOWN }, /* Prev Weapon */
     { PAD_FACE_START,   KEY_ESCAPE },   /* Menu */
     { PAD_FACE_SELECT,  KEY_TAB },      /* Automap */
 };
@@ -263,21 +355,139 @@ static int r2_button_down = 0;
 static int menu_back_down = 0;
 static int menu_enter_down = 0;
 
+extern void R_InitSkyMap(void);
+extern void ST_createWidgets(void);
+extern boolean setsizeneeded;
+extern gamestate_t gamestate;
+
 void I_StartFrame(void)
 {
+    /* Use the vsync dead time for OPL music register writes.
+     * OPL_AdvanceMusic() parses MUS events and does bus-stalling
+     * OPL MMIO writes (~27us each, up to ~4ms on dense beats).
+     * Running this here keeps those stalls off the rendering
+     * critical path — they overlap with the vsync wait instead
+     * of adding to frame time after I_FinishUpdate. */
+    OPL_AdvanceMusic();
+
     /* Wait for any pending framebuffer swap to complete before the
      * game loop draws the next frame.  This ensures the CPU never
      * writes into the buffer that the FPGA is still scanning out
      * (which causes flickering on menus/status bar).
-     * Placed here rather than at the end of I_FinishUpdate so that
-     * audio mixing (I_UpdateSound + I_SubmitSound, after D_Display)
-     * is not blocked by the vsync wait — prevents music slowdown. */
+     * Measure wait time for VRR — long wait = headroom to spare. */
+    uint32_t wait_start = SYS_CYCLE_LO;
     while (SYS_FB_SWAP)
         ;
+    uint32_t vsync_wait = SYS_CYCLE_LO - wait_start;
 
-    /* Drain pending audio into the FIFO at the top of the frame too,
-     * so submission isn't limited to one chance per loop iteration. */
-    I_SubmitSound();
+    /* Advance the vsync-locked tic accumulator.
+     *
+     * The vsync period is crystal-stable but the cycle-counter reading
+     * has polling jitter (a few cycles).  Use an exponential moving
+     * average (α = 1/16) to lock onto the true period.  This makes
+     * the tic pattern deterministic — tic boundaries never wobble
+     * between frames due to measurement noise.
+     *
+     * Missed-vsync frames (dt ≈ 2× normal) are detected and the
+     * accumulator is advanced by the correct number of periods so
+     * the game maintains correct speed. */
+    {
+        uint32_t now_cy = SYS_CYCLE_LO;
+        if (last_vsync_cycles) {
+            uint32_t raw_dt = now_cy - last_vsync_cycles;
+            if (!smooth_dt) {
+                /* First frame: seed the filter */
+                smooth_dt = raw_dt;
+                tic_accum += ((uint64_t)smooth_dt * TIC_RECIP_48 >> 16);
+            } else if (raw_dt < smooth_dt * 3 / 2) {
+                /* Normal frame: update EMA (α = 1/16 for stability),
+                 * advance accumulator by one smoothed period. */
+                smooth_dt += ((int32_t)raw_dt - (int32_t)smooth_dt) / 16;
+                tic_accum += ((uint64_t)smooth_dt * TIC_RECIP_48 >> 16);
+            } else {
+                /* Missed vsync: don't pollute the filter, but advance
+                 * the accumulator by the correct number of periods so
+                 * the game maintains correct speed in heavy areas. */
+                uint32_t periods = (raw_dt + smooth_dt / 2) / smooth_dt;
+                if (periods > 4) periods = 4;  /* safety cap */
+                tic_accum += (uint64_t)(smooth_dt * periods) * TIC_RECIP_48 >> 16;
+            }
+        }
+        last_vsync_cycles = now_cy;
+    }
+
+    /* Poll Original Mode setting — allows live switching from Core Options */
+    int new_mode = (SYS_ORIGINAL_MODE != 0) ? 1 : 0;
+    if (new_mode != original_mode) {
+        original_mode = new_mode;
+        setsizeneeded = true;   /* recalculate viewheight, viewwindowy, etc. */
+        R_InitSkyMap();         /* recalculate skytexturemid */
+
+        /* Recreate status bar widgets with new Y positions (safe — no lump access) */
+        if (gamestate == GS_LEVEL)
+            ST_createWidgets();
+
+        /* Clear both framebuffers to black so the black bars are clean */
+        memset((void *)(0x50000000 + 0x000000), 0, FB_STRIDE * FB_LINES);
+        memset((void *)(0x50000000 + 0x100000), 0, FB_STRIDE * FB_LINES);
+    }
+
+    /* Poll Run Mode setting */
+    run_mode = SYS_RUN_MODE;
+
+    /* VRR: compute V_TOTAL directly from smoothed render time.
+     * Instead of incremental ±1 adjustments (which oscillate and jitter),
+     * measure how long rendering actually takes, smooth it with a fast
+     * EMA (α = 1/8), and compute the exact V_TOTAL that gives ~10%
+     * headroom above the render time.
+     * Hard clamp to [VRR_V_MIN, VRR_V_MAX] (60–47 Hz). */
+    {
+        static uint32_t smooth_render = 0;
+        static uint32_t vrr_v = 0;
+
+        if (SYS_REFRESH_RATE == 3 && smooth_dt > 0) {
+            /* Approximate render time = frame period minus vsync wait.
+             * On missed frames (wait=0), this equals the full frame time. */
+            uint32_t render_time = smooth_dt - (vsync_wait < smooth_dt ? vsync_wait : 0);
+
+            /* Asymmetric EMA: fast attack (α = 1/4) when load increases,
+             * slow decay (α = 1/16) when load decreases.  This reacts
+             * quickly to heavy frames (avoids missed vsyncs) but recovers
+             * gradually (avoids jitter when load fluctuates). */
+            if (!smooth_render)
+                smooth_render = render_time;
+            else if (render_time > smooth_render)
+                smooth_render = render_time;  /* instant drop Hz — never miss a vsync */
+            else
+                smooth_render += ((int32_t)render_time - (int32_t)smooth_render) / 64;  /* ramp back to high Hz very slowly */
+
+            /* Derive cycles-per-video-line from measured vsync period */
+            if (!vrr_v || vrr_v < VRR_V_MIN || vrr_v > VRR_V_MAX)
+                vrr_v = 262;
+            uint32_t cycles_per_line = smooth_dt / vrr_v;
+
+            if (cycles_per_line > 0) {
+                /* Desired frame period = render time + 10% headroom */
+                uint32_t desired = smooth_render + smooth_render / 10;
+                vrr_v = desired / cycles_per_line;
+
+                /* Clamp to safe scaler range */
+                if (vrr_v < VRR_V_MIN) vrr_v = VRR_V_MIN;
+                if (vrr_v > VRR_V_MAX) vrr_v = VRR_V_MAX;
+            }
+
+            SYS_V_TOTAL = vrr_v;
+        } else {
+            /* Not in VRR mode — reset state so re-entering VRR is clean */
+            smooth_render = 0;
+            vrr_v = 0;
+        }
+    }
+
+    /* Top up the audio ring buffer at the start of each frame too,
+     * so it doesn't drain during heavy rendering.  The deficit check
+     * inside I_UpdateSound self-regulates — no double-mixing risk. */
+    I_UpdateSound();
 }
 
 void I_StartTic(void)
@@ -290,15 +500,71 @@ void I_StartTic(void)
 
     event_t event;
 
-    /* Always-run: keep KEY_RSHIFT held permanently.
-     * Must re-send every tic because G_DoLoadLevel() clears gamekeydown
-     * on every level transition, dropping the key state. */
-    if (!gamekeydown[KEY_RSHIFT]) {
-        event.type = ev_keydown;
-        event.data1 = KEY_RSHIFT;
-        event.data2 = 0;
-        event.data3 = 0;
-        D_PostEvent(&event);
+    /* Run mode handling */
+    if (run_mode == RUN_MODE_ALWAYS) {
+        /* Always-run: keep KEY_RSHIFT held permanently.
+         * Must re-send every tic because G_DoLoadLevel() clears gamekeydown
+         * on every level transition, dropping the key state. */
+        if (!gamekeydown[KEY_RSHIFT]) {
+            event.type = ev_keydown;
+            event.data1 = KEY_RSHIFT;
+            event.data2 = 0;
+            event.data3 = 0;
+            D_PostEvent(&event);
+        }
+    } else if (run_mode == RUN_MODE_USE_RUN) {
+        /* Use button also triggers run: inject KEY_RSHIFT when Use (B) is held */
+        uint32_t cur_buttons = SYS_CONT1_KEY;
+        int use_held = (cur_buttons & PAD_FACE_B) != 0;
+        if (use_held && !gamekeydown[KEY_RSHIFT]) {
+            event.type = ev_keydown;
+            event.data1 = KEY_RSHIFT;
+            event.data2 = 0;
+            event.data3 = 0;
+            D_PostEvent(&event);
+        } else if (!use_held && gamekeydown[KEY_RSHIFT]) {
+            event.type = ev_keyup;
+            event.data1 = KEY_RSHIFT;
+            event.data2 = 0;
+            event.data3 = 0;
+            D_PostEvent(&event);
+        }
+    } else if (run_mode == RUN_MODE_DOUBLETAP) {
+        /* Double-tap forward to run: track D-pad Up timing */
+        static uint32_t last_up_press_time = 0;
+        static int doubletap_running = 0;
+        uint32_t cur_buttons = SYS_CONT1_KEY;
+        int up_now = (cur_buttons & PAD_DPAD_UP) != 0;
+        int up_prev = (prev_buttons & PAD_DPAD_UP) != 0;
+
+        if (up_now && !up_prev) {
+            /* Rising edge: check if double-tap */
+            uint32_t now = SYS_CYCLE_LO;
+            uint32_t delta = now - last_up_press_time;
+            /* ~300ms window at 100MHz = 30,000,000 cycles */
+            if (delta < 30000000 && last_up_press_time != 0) {
+                doubletap_running = 1;
+            }
+            last_up_press_time = now;
+        }
+
+        if (!up_now) {
+            doubletap_running = 0;
+        }
+
+        if (doubletap_running && !gamekeydown[KEY_RSHIFT]) {
+            event.type = ev_keydown;
+            event.data1 = KEY_RSHIFT;
+            event.data2 = 0;
+            event.data3 = 0;
+            D_PostEvent(&event);
+        } else if (!doubletap_running && gamekeydown[KEY_RSHIFT]) {
+            event.type = ev_keyup;
+            event.data1 = KEY_RSHIFT;
+            event.data2 = 0;
+            event.data3 = 0;
+            D_PostEvent(&event);
+        }
     }
 
     uint32_t buttons = SYS_CONT1_KEY;

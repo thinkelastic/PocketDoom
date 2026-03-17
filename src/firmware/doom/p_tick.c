@@ -100,7 +100,7 @@ void P_AllocateThinker (thinker_t*      thinker)
 //
 // P_RunThinkers
 //
-void P_RunThinkers (void)
+PD_FASTTEXT void P_RunThinkers (void)
 {
     thinker_t*  currentthinker;
 

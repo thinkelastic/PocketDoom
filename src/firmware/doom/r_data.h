@@ -39,6 +39,10 @@ R_GetColumn
   int           col );
 
 
+// Copy a column into BRAM for fast reads by R_DrawColumn.
+// Only for regular walls — NOT for masked columns (post headers).
+byte* R_CacheColumn(byte *src);
+
 // Invalidate R_GetColumn's single-entry lump cache (call once per frame).
 void R_InvalidateColumnCache(void);
 

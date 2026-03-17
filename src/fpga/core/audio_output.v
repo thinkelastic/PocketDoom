@@ -99,15 +99,23 @@ end
 // Data format: 32 bits per channel (16 data + 16 dummy), MSB first
 // LRCK toggles every 32 SCLK cycles
 
-// Hold last valid sample on FIFO underrun to avoid clicks/pops.
-// Dropping to silence (0) causes a hard discontinuity = audible pop.
+// Hold last valid sample on FIFO underrun, then ramp to zero.
+// Immediate drop to silence causes a hard discontinuity = audible pop.
+// Instead, decay the held value toward zero over ~5ms (256 samples at 48kHz).
 reg signed [15:0] hold_l = 16'sh0;
 reg signed [15:0] hold_r = 16'sh0;
 
 always @(posedge clk_audio) begin
-    if (audio_pop && !fifo_empty) begin
-        hold_l <= $signed(fifo_l);
-        hold_r <= $signed(fifo_r);
+    if (audio_pop) begin
+        if (!fifo_empty) begin
+            hold_l <= $signed(fifo_l);
+            hold_r <= $signed(fifo_r);
+        end else begin
+            // Ramp toward zero: arithmetic right shift by 6 (~64 sample fade)
+            // Keeps sign, converges to 0 for both positive and negative values
+            hold_l <= hold_l - (hold_l >>> 6);
+            hold_r <= hold_r - (hold_r >>> 6);
+        end
     end
 end
 

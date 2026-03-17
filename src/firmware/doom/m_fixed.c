@@ -56,7 +56,7 @@ FixedMul
 // FixedDiv, C version.
 //
 
-fixed_t
+PD_FASTTEXT fixed_t
 FixedDiv
 ( fixed_t       a,
   fixed_t       b )

@@ -38,6 +38,7 @@ rcsid[] = "$Id: p_telept.c,v 1.3 1997/01/28 22:08:29 b1 Exp $";
 
 // State.
 #include "r_state.h"
+#include "r_main.h"
 
 
 
@@ -119,7 +120,10 @@ EV_Teleport
 
                 // don't move for a bit
                 if (thing->player)
+                {
                     thing->reactiontime = 18;
+                    R_InterpolationReset();
+                }
 
                 thing->angle = m->angle;
                 thing->momx = thing->momy = thing->momz = 0;

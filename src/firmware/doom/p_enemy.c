@@ -271,7 +271,7 @@ fixed_t yspeed[8] = {0,47000,FRACUNIT,47000,0,-47000,-FRACUNIT,-47000};
 extern  line_t* spechit[MAXSPECIALCROSS];
 extern  int     numspechit;
 
-boolean P_Move (mobj_t* actor)
+PD_FASTTEXT boolean P_Move (mobj_t* actor)
 {
     fixed_t     tryx;
     fixed_t     tryy;
@@ -362,7 +362,7 @@ boolean P_TryWalk (mobj_t* actor)
 
 
 
-void P_NewChaseDir (mobj_t*     actor)
+PD_FASTTEXT void P_NewChaseDir (mobj_t*     actor)
 {
     fixed_t     deltax;
     fixed_t     deltay;
@@ -600,7 +600,7 @@ void A_KeenDie (mobj_t* mo)
 // A_Look
 // Stay in state until a player is sighted.
 //
-void A_Look (mobj_t* actor)
+PD_FASTTEXT void A_Look (mobj_t* actor)
 {
     mobj_t*     targ;
 
@@ -668,7 +668,7 @@ void A_Look (mobj_t* actor)
 // Actor has a melee attack,
 // so it tries to close as fast as possible
 //
-void A_Chase (mobj_t*   actor)
+PD_FASTTEXT void A_Chase (mobj_t*   actor)
 {
     int         delta;
 
