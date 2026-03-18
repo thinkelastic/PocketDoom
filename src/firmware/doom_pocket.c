@@ -55,9 +55,9 @@ extern void I_UpdateSound(void);
 #define SYS_REFRESH_RATE    (*(volatile uint32_t *)(SYS_BASE + 0x78))
 #define SYS_V_TOTAL         (*(volatile uint32_t *)(SYS_BASE + 0x7C))
 
-/* VRR limits: 47-62 Hz at 12.288 MHz pixel clock, H_TOTAL=780 */
+/* VRR limits: 42-60 Hz at 12.288 MHz pixel clock, H_TOTAL=780 */
 #define VRR_V_MIN   262   /* 60 Hz */
-#define VRR_V_MAX   335   /* 47 Hz */
+#define VRR_V_MAX   375   /* 42 Hz */
 
 /* Run mode values */
 #define RUN_MODE_ALWAYS     0   /* Always run (default) */
@@ -440,7 +440,7 @@ void I_StartFrame(void)
      * measure how long rendering actually takes, smooth it with a fast
      * EMA (α = 1/8), and compute the exact V_TOTAL that gives ~10%
      * headroom above the render time.
-     * Hard clamp to [VRR_V_MIN, VRR_V_MAX] (60–47 Hz). */
+     * Hard clamp to [VRR_V_MIN, VRR_V_MAX] (60–42 Hz). */
     {
         static uint32_t smooth_render = 0;
         static uint32_t vrr_v = 0;

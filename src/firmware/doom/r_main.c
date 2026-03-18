@@ -691,12 +691,7 @@ void R_ExecuteSetViewSize (void)
 
     setsizeneeded = false;
 
-    // At 320x240, every screen size renders one notch smaller than 320x200.
-    // The renderer was designed for 200 lines — a full 240-line viewport
-    // has sky/floor gaps.  This makes "fullscreen" at 240p = max with bar.
     int effblocks = setblocks;
-    if (!original_mode && effblocks > 3)
-        effblocks--;
 
     if (effblocks == 11)
     {

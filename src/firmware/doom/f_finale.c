@@ -293,7 +293,7 @@ void F_TextWrite (void)
 
     // draw some of the text onto the screen
     cx = 10;
-    cy = 10;
+    cy = 10 + RENDER_YOFF;
     ch = finaletext;
 
     count = (finalecount - 10)/TEXTSPEED;
@@ -565,7 +565,7 @@ void F_CastPrint (char* text)
         }
 
         w = SHORT (hu_font[c]->width);
-        V_DrawPatch(cx, 180, 0, hu_font[c]);
+        V_DrawPatch(cx, 180 + RENDER_YOFF, 0, hu_font[c]);
         cx+=w;
     }
 
@@ -586,7 +586,8 @@ void F_CastDrawer (void)
     patch_t*            patch;
 
     // erase the entire screen to a background
-    V_DrawPatch (0,(SCREENHEIGHT-200)/2,0, W_CacheLumpName ("BOSSBACK", PU_CACHE));
+    memset(screens[0], 0, SCREENWIDTH * SCREENHEIGHT);
+    V_DrawPatch (0, RENDER_YOFF, 0, W_CacheLumpName ("BOSSBACK", PU_CACHE));
 
     F_CastPrint (castorder[castnum].name);
 
@@ -598,9 +599,9 @@ void F_CastDrawer (void)
 
     patch = W_CacheLumpNum (lump+firstspritelump, PU_CACHE);
     if (flip)
-        V_DrawPatchFlipped (160,170,0,patch);
+        V_DrawPatchFlipped (160,170+RENDER_YOFF,0,patch);
     else
-        V_DrawPatch (160,170,0,patch);
+        V_DrawPatch (160,170+RENDER_YOFF,0,patch);
 }
 
 

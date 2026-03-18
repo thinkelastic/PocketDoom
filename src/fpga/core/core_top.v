@@ -2155,10 +2155,10 @@ assign video_hs = vidout_hs;
                                                  10'd262;   // 60 Hz (default)
 
     // VRR mode (setting 3): use firmware-written V_TOTAL, hard clamp to safe range.
-    // Outside [254,335] the Pocket scaler loses sync — never allow it.
+    // Pocket scaler accepts 42-60 Hz → V_TOTAL range [262, 375].
     wire vrr_active = (refresh_rate_vid_sync2[1:0] == 2'd3);
     wire [9:0] vrr_vt_safe = (vrr_vt_sync2 < 10'd262) ? 10'd262 :
-                              (vrr_vt_sync2 > 10'd335) ? 10'd335 :
+                              (vrr_vt_sync2 > 10'd375) ? 10'd375 :
                               (vrr_vt_sync2 == 10'd0)  ? 10'd262 : vrr_vt_sync2;
     wire [9:0] crt_v_total_next = vrr_active ? vrr_vt_safe : crt_v_total_preset;
     localparam CRT_H_TOTAL  = CRT_H_SYNC + CRT_H_BPORCH + CRT_H_ACTIVE + CRT_H_FPORCH;

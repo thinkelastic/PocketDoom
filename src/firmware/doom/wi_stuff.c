@@ -79,19 +79,19 @@ rcsid[] = "$Id: wi_stuff.c,v 1.7 1997/02/03 22:45:13 b1 Exp $";
 
 
 // GLOBAL LOCATIONS
-#define WI_TITLEY               2
+#define WI_TITLEY               (2 + RENDER_YOFF)
 #define WI_SPACINGY             33
 
 // SINGPLE-PLAYER STUFF
 #define SP_STATSX               50
-#define SP_STATSY               50
+#define SP_STATSY               (50 + RENDER_YOFF)
 
 #define SP_TIMEX                16
 #define SP_TIMEY                (SCREENHEIGHT-32)
 
 
 // NET GAME STUFF
-#define NG_STATSY               50
+#define NG_STATSY               (50 + RENDER_YOFF)
 #define NG_STATSX               (32 + SHORT(star->width)/2 + 32*!dofrags)
 
 #define NG_SPACINGX             64
@@ -99,14 +99,14 @@ rcsid[] = "$Id: wi_stuff.c,v 1.7 1997/02/03 22:45:13 b1 Exp $";
 
 // DEATHMATCH STUFF
 #define DM_MATRIXX              42
-#define DM_MATRIXY              68
+#define DM_MATRIXY              (68 + RENDER_YOFF)
 
 #define DM_SPACINGX             40
 
 #define DM_TOTALSX              269
 
 #define DM_KILLERSX             10
-#define DM_KILLERSY             100
+#define DM_KILLERSY             (100 + RENDER_YOFF)
 #define DM_VICTIMSX             5
 #define DM_VICTIMSY             50
 
@@ -471,7 +471,7 @@ WI_drawOnLnode
     do
     {
         left = lnodes[wbs->epsd][n].x - SHORT(c[i]->leftoffset);
-        top = lnodes[wbs->epsd][n].y - SHORT(c[i]->topoffset);
+        top = lnodes[wbs->epsd][n].y + RENDER_YOFF - SHORT(c[i]->topoffset);
         right = left + SHORT(c[i]->width);
         bottom = top + SHORT(c[i]->height);
 
@@ -490,7 +490,7 @@ WI_drawOnLnode
 
     if (fits && i<2)
     {
-        V_DrawPatch(lnodes[wbs->epsd][n].x, lnodes[wbs->epsd][n].y,
+        V_DrawPatch(lnodes[wbs->epsd][n].x, lnodes[wbs->epsd][n].y + RENDER_YOFF,
                     FB, c[i]);
     }
     else
@@ -598,7 +598,7 @@ void WI_drawAnimatedBack(void)
         a = &anims[wbs->epsd][i];
 
         if (a->ctr >= 0)
-            V_DrawPatch(a->loc.x, a->loc.y, FB, a->p[a->ctr]);
+            V_DrawPatch(a->loc.x, a->loc.y + RENDER_YOFF, FB, a->p[a->ctr]);
     }
 
 }
@@ -1551,14 +1551,25 @@ void WI_loadData(void)
         strcpy(name,"INTERPIC");
     }
 
-    // background — center 320x200 patch on 320x240 screen
+    // background — draw 320x200 patch
     bg = W_CacheLumpName(name, PU_CACHE);
+    memset(screens[1], 0, SCREENWIDTH * SCREENHEIGHT);
+    if (!original_mode)
     {
-        int yoff = (SCREENHEIGHT - 200) / 2;
-        memset(screens[1], 0, SCREENWIDTH * yoff);
-        memset(screens[1] + SCREENWIDTH * (yoff + 200), 0, SCREENWIDTH * yoff);
+        // 320x240: stretch 200 → 240 lines to fill screen
+        V_DrawPatch(0, 0, 1, bg);
+        byte *buf = screens[1];
+        for (int y = SCREENHEIGHT - 1; y >= 0; y--)
+        {
+            int src_y = y * 200 / SCREENHEIGHT;
+            memcpy(buf + y * SCREENWIDTH, buf + src_y * SCREENWIDTH, SCREENWIDTH);
+        }
     }
-    V_DrawPatch(0, (SCREENHEIGHT-200)/2, 1, bg);
+    else
+    {
+        // 320x200: center patch in 240-line framebuffer
+        V_DrawPatch(0, RENDER_YOFF, 1, bg);
+    }
 
 
     // UNUSED unsigned char *pic = screens[1];
