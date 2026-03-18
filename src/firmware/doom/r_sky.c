@@ -58,6 +58,10 @@ int                     skytexturemid;
 void R_InitSkyMap (void)
 {
   // skyflatnum = R_FlatNumForName ( SKYFLATNAME );
-    skytexturemid = (RENDER_HEIGHT/2)*FRACUNIT;
+    // Always center at 100 (the 200p design point) regardless of resolution.
+    // At 240p, centery=120 but the sky maps from the same texture rows —
+    // this pushes the wrap zone (bright clouds) below the visible area
+    // instead of showing it at the bottom of the viewport.
+    skytexturemid = 100*FRACUNIT;
 }
 

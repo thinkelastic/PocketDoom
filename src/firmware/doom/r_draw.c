@@ -174,7 +174,8 @@ PD_FASTTEXT void R_DrawSkyColumn (void)
 
     do
     {
-        *dest = source[(frac>>FRACBITS)&127];
+        int row = frac >> FRACBITS;
+        *dest = source[row < 0 ? 0 : row & 127];
 
         dest += SCREENWIDTH;
         frac += fracstep;
@@ -637,6 +638,7 @@ void R_FillBackScreen (void)
 
     char*       name;
 
+    // Skip only if viewport fills the entire area above the status bar
     if (scaledviewwidth == 320)
         return;
 
@@ -740,7 +742,8 @@ void R_DrawViewBorder (void)
     int         ofs;
     int         i;
 
-    if (scaledviewwidth == SCREENWIDTH)
+    // Skip only if viewport fills the entire area above the status bar
+    if (scaledviewwidth == 320)
         return;
 
     top = ((SCREENHEIGHT-SBARHEIGHT)-viewheight)/2;

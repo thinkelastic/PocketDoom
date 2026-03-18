@@ -27,18 +27,20 @@ module audio_upsample (
 // ============================================
 // 48 kHz tick generator (66 MHz / 1375 = 48 kHz)
 // ============================================
-localparam [10:0] TICK_DIV = 11'd1375;
+// clk = 100 MHz (clk_cpu = clk_ram_controller from mf_pllram_133)
+// 100,000,000 / 48,000 = 2083.33 → 2083
+localparam [11:0] TICK_DIV = 12'd2083;
 
-reg [10:0] tick_cnt;
-wire tick_48k = (tick_cnt == 11'd0);
+reg [11:0] tick_cnt;
+wire tick_48k = (tick_cnt == 12'd0);
 
 always @(posedge clk or negedge reset_n) begin
     if (!reset_n)
-        tick_cnt <= TICK_DIV - 11'd1;
-    else if (tick_cnt == 11'd0)
-        tick_cnt <= TICK_DIV - 11'd1;
+        tick_cnt <= TICK_DIV - 12'd1;
+    else if (tick_cnt == 12'd0)
+        tick_cnt <= TICK_DIV - 12'd1;
     else
-        tick_cnt <= tick_cnt - 11'd1;
+        tick_cnt <= tick_cnt - 12'd1;
 end
 
 // ============================================

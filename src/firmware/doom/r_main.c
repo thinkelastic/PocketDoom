@@ -691,15 +691,22 @@ void R_ExecuteSetViewSize (void)
 
     setsizeneeded = false;
 
-    if (setblocks == 11)
+    // At 320x240, every screen size renders one notch smaller than 320x200.
+    // The renderer was designed for 200 lines — a full 240-line viewport
+    // has sky/floor gaps.  This makes "fullscreen" at 240p = max with bar.
+    int effblocks = setblocks;
+    if (!original_mode && effblocks > 3)
+        effblocks--;
+
+    if (effblocks == 11)
     {
         scaledviewwidth = SCREENWIDTH;
         viewheight = RENDER_HEIGHT;
     }
     else
     {
-        scaledviewwidth = setblocks*32;
-        viewheight = (setblocks*(RENDER_HEIGHT-32)/10)&~7;
+        scaledviewwidth = effblocks*32;
+        viewheight = (effblocks*(RENDER_HEIGHT-32)/10)&~7;
     }
 
     detailshift = setdetail;
@@ -921,6 +928,15 @@ PD_FASTTEXT void R_RenderPlayerView (player_t* player)
 
     R_SetupFrame (player);
 
+    // Clear viewport to black — at 320x240 the renderer may not fill
+    // every pixel (Doom was designed for 200p).  Without this, gaps
+    // show stale/white pixels from the previous frame or uninit memory.
+    {
+        extern byte *screens[5];
+        memset(screens[0] + viewwindowy * SCREENWIDTH,
+               0, viewheight * SCREENWIDTH);
+    }
+
     // Clear buffers.
     R_ClearClipSegs ();
     R_ClearDrawSegs ();
@@ -935,6 +951,7 @@ PD_FASTTEXT void R_RenderPlayerView (player_t* player)
     R_RenderBSPNode (numnodes-1);
 
     OPL_AdvanceMusic ();
+    I_UpdateSound ();   // keep ring buffer fed during heavy rendering
 
     // Check for new console commands.
     NetUpdate ();
@@ -942,6 +959,7 @@ PD_FASTTEXT void R_RenderPlayerView (player_t* player)
     R_DrawPlanes ();
 
     OPL_AdvanceMusic ();
+    I_UpdateSound ();   // keep ring buffer fed during heavy rendering
 
     // Check for new console commands.
     NetUpdate ();
