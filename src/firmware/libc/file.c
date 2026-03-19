@@ -107,6 +107,33 @@ static int filename_to_slot(const char *pathname) {
 #define CFG_PSRAM_ADDR      0x30060000
 #define CFG_PSRAM_UC        ((volatile uint8_t *)CFG_PSRAM_ADDR)
 #define CFG_PSRAM_SIZE      0x1000       /* 4KB */
+
+/* Validate that PSRAM config data looks like Doom key-value config.
+ * Returns the size of valid config text, or 0 if invalid.
+ * Valid config: printable ASCII lines with at least one tab separator.
+ * Rejects uninitialized PSRAM (0xFF), binary garbage, or all zeros. */
+static uint32_t cfg_validate_psram(void) {
+    int has_tab = 0;
+    int has_newline = 0;
+    uint32_t size = 0;
+    uint32_t max = CFG_PSRAM_SIZE < CFG_MAX_SIZE ? CFG_PSRAM_SIZE : CFG_MAX_SIZE;
+
+    for (uint32_t i = 0; i < max; i++) {
+        uint8_t b = CFG_PSRAM_UC[i];
+        if (b == 0) break;
+        if (b == '\t') has_tab = 1;
+        else if (b == '\n') has_newline = 1;
+        else if (b != '\r' && (b < 0x20 || b > 0x7E))
+            return 0;  /* non-printable byte = not valid config */
+        size = i + 1;
+    }
+
+    /* Valid config has at least one key\tvalue\n line */
+    if (size < 3 || !has_tab || !has_newline)
+        return 0;
+
+    return size;
+}
 #define SAV_SLOT_SIZE       0x10000      /* 64KB per slot in PSRAM (header + compressed) */
 #define SAV_SLOT_ID_BASE    10           /* Data slot ID (single nonvolatile slot) */
 #define SAV_V2_HEADER_SIZE  16           /* magic[4] + game_id[4] + comp_size[4] + uncomp_size[4] */
@@ -550,19 +577,13 @@ FILE *fopen(const char *pathname, const char *mode) {
 
         /* Read mode: try PSRAM config region first (previously saved),
          * fall back to SD card deferload slot 3 (original default.cfg).
-         * PSRAM format: "PDCF" magic + uint32 size + raw config data. */
-        uint32_t cfg_size = 0;
-        if (CFG_PSRAM_UC[0] == 'P' && CFG_PSRAM_UC[1] == 'D' &&
-            CFG_PSRAM_UC[2] == 'C' && CFG_PSRAM_UC[3] == 'F') {
-            volatile uint32_t *hdr = (volatile uint32_t *)CFG_PSRAM_UC;
-            uint32_t sz = hdr[1];
-            if (sz > 0 && sz <= CFG_MAX_SIZE) {
-                memset(sav_buf, 0, CFG_MAX_SIZE);
-                volatile uint8_t *src = CFG_PSRAM_UC + 8;
-                for (uint32_t i = 0; i < sz; i++)
-                    sav_buf[i] = src[i];
-                cfg_size = sz;
-            }
+         * Validates that PSRAM contains parseable config (printable ASCII
+         * with key\tvalue\n lines).  Hand-edited files are accepted. */
+        uint32_t cfg_size = cfg_validate_psram();
+        if (cfg_size > 0) {
+            memset(sav_buf, 0, CFG_MAX_SIZE);
+            for (uint32_t i = 0; i < cfg_size; i++)
+                sav_buf[i] = CFG_PSRAM_UC[i];
         }
         if (cfg_size == 0) {
             /* No saved config in PSRAM — load from SD card */
@@ -639,17 +660,15 @@ int fclose(FILE *stream) {
 
     /* Config write-back: persist to dedicated PSRAM region at 0x30060000.
      * Bridge auto-saves to SD on shutdown (separate nonvolatile slot).
-     * Format: "PDCF" + uint32 size + raw data. */
+     * Raw config text, zero-filled remainder. Readable and hand-editable. */
     if ((stream->flags & FILE_FLAG_CFG) && stream->offset > 0) {
-        volatile uint32_t *hdr = (volatile uint32_t *)CFG_PSRAM_UC;
         uint32_t sz = stream->offset;
-        if (sz > CFG_PSRAM_SIZE - 8) sz = CFG_PSRAM_SIZE - 8;
-        CFG_PSRAM_UC[0] = 'P'; CFG_PSRAM_UC[1] = 'D';
-        CFG_PSRAM_UC[2] = 'C'; CFG_PSRAM_UC[3] = 'F';
-        hdr[1] = sz;
-        volatile uint8_t *dst = CFG_PSRAM_UC + 8;
+        if (sz > CFG_PSRAM_SIZE) sz = CFG_PSRAM_SIZE;
+        volatile uint8_t *dst = CFG_PSRAM_UC;
         for (uint32_t i = 0; i < sz; i++)
             dst[i] = (uint8_t)sav_buf[i];
+        for (uint32_t i = sz; i < CFG_PSRAM_SIZE; i++)
+            dst[i] = 0;
     }
     /* Save write-back: persist to PSRAM */
     else if ((stream->flags & FILE_FLAG_WRITE) && stream->offset > 0 && sav_write_sub_idx >= 0) {

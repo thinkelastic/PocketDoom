@@ -2026,7 +2026,6 @@ boolean M_Responder (event_t* ev)
         currentMenu->lastOn = itemOn;
         if (currentMenu->prevMenu)
         {
-            M_SaveDefaults();  /* Persist settings on menu back */
             currentMenu = currentMenu->prevMenu;
             itemOn = currentMenu->lastOn;
             S_StartSound(NULL,sfx_swtchn);
@@ -2151,8 +2150,7 @@ void M_Drawer (void)
 void M_ClearMenus (void)
 {
     menuactive = 0;
-    // if (!netgame && usergame && paused)
-    //       sendpause = true;
+    M_SaveDefaults();  /* Persist settings to PSRAM on menu close */
 }
 
 
