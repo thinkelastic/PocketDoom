@@ -139,21 +139,21 @@ always @(posedge clk_audio) begin
         opl_latched <= opl_audio_in;   // data stable — safe to latch
 end
 
-// Mix SFX + OPL into both L and R channels, then 2x boost.
+// Mix SFX + OPL into both L and R channels, then 1.5x boost (×3 >>> 1).
 wire signed [15:0] opl_scaled = opl_latched;
 wire signed [16:0] mix_l = {sfx_l[15], sfx_l} + {opl_scaled[15], opl_scaled};
 wire signed [16:0] mix_r = {sfx_r[15], sfx_r} + {opl_scaled[15], opl_scaled};
 
-// 2x boost
-wire signed [17:0] boost_l = {mix_l[16], mix_l} <<< 1;
-wire signed [17:0] boost_r = {mix_r[16], mix_r} <<< 1;
+// 3x boost
+wire signed [18:0] boost_l = {{2{mix_l[16]}}, mix_l} + {mix_l[16], mix_l, 1'b0};
+wire signed [18:0] boost_r = {{2{mix_r[16]}}, mix_r} + {mix_r[16], mix_r, 1'b0};
 
 // Clamp to 16-bit signed
-wire [15:0] mix_clamp_l = (boost_l > 18'sd32767)  ? 16'h7FFF :
-                           (boost_l < -18'sd32768) ? 16'h8000 :
+wire [15:0] mix_clamp_l = (boost_l > 19'sd32767)  ? 16'h7FFF :
+                           (boost_l < -19'sd32768) ? 16'h8000 :
                            boost_l[15:0];
-wire [15:0] mix_clamp_r = (boost_r > 18'sd32767)  ? 16'h7FFF :
-                           (boost_r < -18'sd32768) ? 16'h8000 :
+wire [15:0] mix_clamp_r = (boost_r > 19'sd32767)  ? 16'h7FFF :
+                           (boost_r < -19'sd32768) ? 16'h8000 :
                            boost_r[15:0];
 
 // ============================================
@@ -167,15 +167,15 @@ audio_filters #(.CLK_RATE(12288000)) audio_filt (
     .clk       (clk_audio),
     .reset     (~reset_n),
 
-    // Filter coefficients — gentle low-pass (~8 kHz cutoff)
+    // Filter coefficients — light low-pass (~12 kHz cutoff)
     .flt_rate  (32'd11000000),
-    .cx        (40'd4258969),
+    .cx        (40'd16777216),
     .cx0       (8'd3),
     .cx1       (8'd3),
     .cx2       (8'd1),
-    .cy0       (-24'd6216759),
-    .cy1       ( 24'd6143386),
-    .cy2       (-24'd2023767),
+    .cy0       (-24'd5765342),
+    .cy1       ( 24'd5285916),
+    .cy2       (-24'd1611482),
 
     // Audio mix controls (passthrough, no attenuation)
     .att       (5'b0),
@@ -195,8 +195,8 @@ reg [15:0] active_l = 16'h0;
 reg [15:0] active_r = 16'h0;
 always @(posedge clk_audio) begin
     if (audio_pop) begin
-        active_l <= mix_clamp_l;
-        active_r <= mix_clamp_r;
+        active_l <= filt_out_l;
+        active_r <= filt_out_r;
     end
 end
 

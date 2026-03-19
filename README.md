@@ -50,9 +50,9 @@ Special key codes: `240` = weapon up (next), `241` = weapon down (previous), `0`
 - **Full Doom engine** — Software-rendered Doom at 320x200, 8-bit indexed color with hardware palette lookup
 - **VexiiRiscv RISC-V CPU** — rv32imafc (integer, multiply/divide, atomics, single-precision FPU, compressed) at 100 MHz with AXI4 bus, 64KB I-cache and 64KB D-cache
 - **Execute from SDRAM** — Doom code runs directly from SDRAM with AXI4 burst I-cache fills; hot rendering functions pinned in BRAM for zero-latency access
-- **Hardware OPL2 synthesizer** — jtopl2 FPGA core replaces software OPL emulation for music playback
+- **Hardware OPL3 synthesizer** — opl3_fpga (YMF262) core with 18 voices, replacing software OPL emulation for music playback
 - **Non-blocking audio** — Variable-length SFX mixing driven by FIFO level feedback, decoupled from frame rate
-- **48 kHz stereo audio** — Hardware mixing of OPL2 music + SFX, I2S output
+- **48 kHz stereo audio** — Hardware mixing of OPL3 music + SFX, I2S output
 - **Vsync-locked double buffering** — Direct framebuffer rendering with D-cache flush, swap synchronized to 60 Hz vsync
 - **CPU-controlled asset loading** — WAD and doom.bin loaded via deferload (dataslot API) with WAD header parsing to determine file size
 - **2-player link cable multiplayer** — GB/GBC link cable at 256 kHz, full-duplex serial protocol
@@ -80,7 +80,7 @@ Special key codes: `240` = weapon up (next), `241` = weapon down (previous), `0`
 |  +----+--------+---------+---------+---------+--------+-------+      |
 |       |        |         |         |         |        |              |
 |  +----+--+ +---+----+ +-+------+ ++------+ ++-----+ ++------+       |
-|  | Video | | Audio  | | OPL2   | | Link  | | Sys  | | Text  |       |
+|  | Video | | Audio  | | OPL3   | | Link  | | Sys  | | Text  |       |
 |  |Scanout| | Output | | Synth  | | MMIO  | | Regs | | Term  |       |
 |  +-------+ +---+----+ +---+----+ +-------+ +------+ +-------+       |
 |                |           |                                          |
@@ -118,7 +118,7 @@ Per-bus address decoding routes transactions to SDRAM, PSRAM, or local periphera
 | `0x40000000`              | 256 B  | System registers                                     |
 | `0x4C000000`              | 8 B    | Audio FIFO (write samples / read status)             |
 | `0x4D000000`              | 256 B  | Link cable MMIO registers                            |
-| `0x4E000000`              | 8 B    | OPL2 hardware registers (addr + data)                |
+| `0x4E000000`              | 16 B   | OPL3 hardware registers (bank 0 + bank 1 addr/data)  |
 | `0x50000000 - 0x53FFFFFF` | 64 MB  | SDRAM uncached alias (bypasses D-cache)              |
 
 ## System Registers (0x40000000)
@@ -135,16 +135,16 @@ Per-bus address decoding routes transactions to SDRAM, PSRAM, or local periphera
 | 0x40   | PAL_INDEX      | Palette write index (auto-increment)           |
 | 0x44   | PAL_DATA       | Palette entry (RGB888, triggers write)         |
 
-## Hardware OPL2 Synthesizer
+## Hardware OPL3 Synthesizer
 
-Doom's music is MUS format, played through OPL2 (YM3812) FM synthesis. The software Nuked OPL3 emulator was too slow on the 100 MHz VexiiRiscv, so synthesis is offloaded to an FPGA OPL2 core ([jotego/jtopl2](https://github.com/jotego/jtopl)).
+Doom's music is MUS format, played through OPL3 (YMF262) FM synthesis. The software Nuked OPL3 emulator was too slow on the 100 MHz VexiiRiscv, so synthesis is offloaded to an FPGA OPL3 core ([gtaylormb/opl3_fpga](https://github.com/gtaylormb/opl3_fpga)).
 
 ```
 Firmware (RISC-V)              FPGA
 +------------------+  MMIO    +------------------+
-| MUS parser       |---0x4E-->| opl2_wrapper     |
-| opl_write()      | bus stall|   jtopl2 core    |
-+------------------+          |   cen ~3.58 MHz  |
+| MUS parser       |---0x4E-->| opl3_wrapper     |
+| opl_write()      | bus stall|   opl3_fpga core |
++------------------+          |   12.288 MHz     |
                               +--------+---------+
                                        | 16-bit signed
 +------------------+          +--------v---------+
@@ -153,12 +153,14 @@ Firmware (RISC-V)              FPGA
 +------------------+          +------------------+
 ```
 
-- **Core:** jtopl2 (pure Verilog, proven on Analogue Pocket)
-- **Clock enable:** 100 MHz / 28 = 3.571 MHz (~0.22% from ideal 3.58 MHz)
-- **MMIO:** `0x4E000000` = register address, `0x4E000004` = register data
-- **Bus stalling:** CPU halts automatically during OPL2 write timing (12 cen cycles for addr, 84 for data)
-- **Mixing:** Saturating 17-bit add of OPL2 mono + SFX stereo in FPGA, before I2S serialization
-- **CDC:** OPL2 audio double-registered from CPU clock to audio clock domain
+- **Core:** opl3_fpga — bit-true YMF262 reverse-engineered design (LGPL-3.0, proven in ao486 MiSTer)
+- **Mode:** Full OPL3 with 18 voices (2 banks × 9 channels), OPL2-compatible register writes
+- **Clock:** 12.288 MHz / 256 = exactly 48 kHz sample rate (matches I2S, no resampling needed)
+- **MMIO:** `0x4E000000/04` = bank 0 addr/data, `0x4E000008/0C` = bank 1 addr/data
+- **Bus stalling:** CPU halts automatically during OPL3 write timing (~4 µs addr, ~24 µs data)
+- **Volume:** Chocolate Doom-compatible volume formula (velocity × channel volume, additive modulator capped at GENMIDI level)
+- **Mixing:** Saturating add of OPL3 mono + SFX stereo with boost, before I2S serialization
+- **CDC:** Toggle-handshake for glitch-free multi-bit clock domain crossing
 
 ## Audio Pipeline
 
@@ -167,8 +169,8 @@ Firmware (RISC-V)              FPGA
 - **SFX FIFO:** 4096-entry dual-clock FIFO (CPU clock to audio clock)
 - **SFX mixing:** Doom mixes at 11,025 Hz with variable batch size driven by FIFO level feedback; firmware upsamples to 48 kHz with linear interpolation
 - **Non-blocking submission:** `I_SubmitSound()` pushes as many samples as the FIFO can accept, called from both `I_StartFrame()` and the main loop to avoid audio gaps
-- **Music:** Hardware OPL2 generates audio continuously; mixed with SFX in FPGA before I2S output
-- **Interface:** CPU writes SFX samples to `0x4C000000`, OPL2 register writes to `0x4E000000`
+- **Music:** Hardware OPL3 generates audio continuously; mixed with SFX in FPGA before I2S output
+- **Interface:** CPU writes SFX samples to `0x4C000000`, OPL3 register writes to `0x4E000000-0x4E00000C`
 
 ## Video Pipeline
 
@@ -395,7 +397,7 @@ Data slot `2` is the PWAD (optional). Slot `3` is the configuration. You can cre
 |   |   |   +-- doomdef.h         # PD_FASTTEXT/PD_FASTDATA macros
 |   |   +-- doom_pocket.c         # Platform layer (video, input, timing)
 |   |   +-- doom_sound.c          # SFX audio driver (async FIFO submission)
-|   |   +-- doom_music.c          # MUS parser + hardware OPL2 driver
+|   |   +-- doom_music.c          # MUS parser + hardware OPL3 driver (18 voices)
 |   |   +-- doom_net.c            # Link cable network driver
 |   |   +-- libc/                 # Minimal C library
 |   |   +-- linker.ld             # Linker script (BRAM/SDRAM layout)
@@ -408,14 +410,14 @@ Data slot `2` is the PWAD (optional). Slot `3` is the configuration. You can cre
 |   |   |   +-- axi_periph_slave.v # BRAM, system regs, palette, controllers
 |   |   |   +-- axi_sdram_slave.v  # SDRAM AXI4 slave with burst support
 |   |   |   +-- axi_sdram_arbiter.v # CPU + video scanout SDRAM arbitration
-|   |   |   +-- opl2_wrapper.v    # Hardware OPL2 peripheral (bus-stalling)
-|   |   |   +-- audio_output.v    # I2S output with OPL2+SFX hardware mixing
+|   |   |   |   +-- opl2_wrapper.v    # Legacy OPL2 wrapper (unused)
+|   |   |   +-- audio_output.v    # I2S output with OPL3+SFX hardware mixing
 |   |   |   +-- io_sdram.v        # SDRAM controller
 |   |   |   +-- psram_controller.v # PSRAM controller
 |   |   |   +-- video_scanout_indexed.v  # 8-bit indexed video scanout
 |   |   |   +-- link_mmio.v       # Link cable serial transceiver
 |   |   |   +-- text_terminal.v   # Debug text overlay
-|   |   +-- jtopl/                # Vendored jtopl2 OPL2 core (jotego, GPL-3.0)
+|   |   +-- opl3/                 # opl3_fpga YMF262 core (Greg Taylor, LGPL-3.0)
 |   |   +-- vexriscv/
 |   |   |   +-- VexiiRiscv_Full.v # Generated RISC-V CPU core
 |   |   +-- apf/                  # Analogue Pocket framework (bridge, I/O)
@@ -427,6 +429,7 @@ Data slot `2` is the PWAD (optional). Slot `3` is the configuration. You can cre
 +-- release/                      # Packaged release for SD card
 +-- tools/
 |   +-- capture_ocr.sh            # HDMI capture + OCR testing tool
+|   +-- mus2vgm.py                # MUS→VGM converter for offline debugging
 +-- Makefile                      # Top-level build/package
 +-- deploy.sh                     # Quick deploy to SD card (auto-detect + mount)
 +-- *.json                        # APF configuration files
@@ -463,7 +466,7 @@ Data slot `2` is the PWAD (optional). Slot `3` is the configuration. You can cre
 ## License
 
 - **Doom engine:** GPL-2.0 (id Software)
-- **jtopl2 OPL2 core:** GPL-3.0 (Jose Tejada / jotego)
+- **opl3_fpga OPL3 core:** LGPL-3.0 (Greg Taylor)
 - **VexiiRiscv:** MIT (SpinalHDL)
 - **PocketDoom (FPGA/firmware):** MIT
 
@@ -471,7 +474,8 @@ Data slot `2` is the PWAD (optional). Slot `3` is the configuration. You can cre
 
 - [boogermann](https://github.com/boogermann/) — First implementation of Doom on RISC-V, which served as the foundation for this project
 - [id Software](https://github.com/id-Software/DOOM) — Original Doom source release
-- [jotego/jtopl](https://github.com/jotego/jtopl) — Hardware OPL2 synthesizer core
+- [gtaylormb/opl3_fpga](https://github.com/gtaylormb/opl3_fpga) — Hardware OPL3 (YMF262) synthesizer core, bit-true reverse-engineered design
+
 - [SpinalHDL/VexiiRiscv](https://github.com/SpinalHDL/VexiiRiscv) — RISC-V CPU core
 - [agg23](https://github.com/agg23) — openFPGA core architecture patterns and reference implementations (audio, video scanout, APF bridge integration)
 - [Analogue](https://www.analogue.co/developer) — Pocket openFPGA development framework
