@@ -45,7 +45,7 @@ static void free_file(FILE *f) {
 /* Data slot IDs (match data.json) */
 #define WAD_SLOT_ID      0    /* IWAD (required) */
 #define PWAD_SLOT_ID     2    /* PWAD mod (optional) */
-#define CFG_SLOT_ID      3    /* default.cfg (read-only) */
+#define CFG_SLOT_ID      3    /* default.cfg */
 #define CFG_MAX_SIZE     2048 /* Max config file size to load */
 
 /* Check if string ends with suffix (case-insensitive) */
@@ -97,10 +97,16 @@ static int filename_to_slot(const char *pathname) {
  * ============================================ */
 
 #define FILE_FLAG_WRITE     1
+#define FILE_FLAG_CFG       2   /* config file — flush to SD via dataslot_write */
 
 #define SAV_CRAM1_ADDR      0x30000000   /* CRAM1 save region (uncached PSRAM) */
 #define SAV_REGION_UC       ((volatile uint8_t *)SAV_CRAM1_ADDR)
 #define SAV_SLOT_COUNT      6            /* Save slots 0-5 */
+
+/* Config PSRAM region — separate nonvolatile slot at 0x30060000 (after saves) */
+#define CFG_PSRAM_ADDR      0x30060000
+#define CFG_PSRAM_UC        ((volatile uint8_t *)CFG_PSRAM_ADDR)
+#define CFG_PSRAM_SIZE      0x1000       /* 4KB */
 #define SAV_SLOT_SIZE       0x10000      /* 64KB per slot in PSRAM (header + compressed) */
 #define SAV_SLOT_ID_BASE    10           /* Data slot ID (single nonvolatile slot) */
 #define SAV_V2_HEADER_SIZE  16           /* magic[4] + game_id[4] + comp_size[4] + uncomp_size[4] */
@@ -529,23 +535,54 @@ FILE *fopen(const char *pathname, const char *mode) {
     /* Config file: read-only from deferload slot 3.
      * Read in small chunks to avoid reading past EOF (bridge errors). */
     if (is_cfg_file(pathname)) {
-        if (mode[0] == 'w') return NULL;  /* read-only */
-        memset(sav_buf, 0, CFG_MAX_SIZE);
-        flush_dcache();  /* Evict dirty D-cache lines before DMA */
-        uint32_t cfg_size = 0;
-        uint32_t chunk = 512;
-        while (cfg_size < CFG_MAX_SIZE) {
-            uint32_t want = CFG_MAX_SIZE - cfg_size;
-            if (want > chunk) want = chunk;
-            if (dataslot_read(CFG_SLOT_ID, cfg_size,
-                              (void *)DMA_BUFFER, want) != 0)
-                break;  /* read error = past EOF or slot empty */
-            memcpy(sav_buf + cfg_size, SDRAM_UNCACHED(DMA_BUFFER), want);
-            cfg_size += want;
+        if (mode[0] == 'w') {
+            /* Write mode: buffer in sav_buf, persist to PSRAM on fclose */
+            FILE *f = alloc_file();
+            if (!f) return NULL;
+            memset(sav_buf, 0, CFG_MAX_SIZE);
+            f->slot_id = CFG_SLOT_ID;
+            f->offset = 0;
+            f->size = CFG_MAX_SIZE;
+            f->flags = FILE_FLAG_WRITE | FILE_FLAG_CFG;
+            f->data = sav_buf;
+            return f;
         }
-        /* Trim trailing NULs */
-        while (cfg_size > 0 && sav_buf[cfg_size - 1] == '\0')
-            cfg_size--;
+
+        /* Read mode: try PSRAM config region first (previously saved),
+         * fall back to SD card deferload slot 3 (original default.cfg).
+         * PSRAM format: "PDCF" magic + uint32 size + raw config data. */
+        uint32_t cfg_size = 0;
+        if (CFG_PSRAM_UC[0] == 'P' && CFG_PSRAM_UC[1] == 'D' &&
+            CFG_PSRAM_UC[2] == 'C' && CFG_PSRAM_UC[3] == 'F') {
+            volatile uint32_t *hdr = (volatile uint32_t *)CFG_PSRAM_UC;
+            uint32_t sz = hdr[1];
+            if (sz > 0 && sz <= CFG_MAX_SIZE) {
+                memset(sav_buf, 0, CFG_MAX_SIZE);
+                volatile uint8_t *src = CFG_PSRAM_UC + 8;
+                for (uint32_t i = 0; i < sz; i++)
+                    sav_buf[i] = src[i];
+                cfg_size = sz;
+            }
+        }
+        if (cfg_size == 0) {
+            /* No saved config in PSRAM — load from SD card */
+            memset(sav_buf, 0, CFG_MAX_SIZE);
+            flush_dcache();
+            cfg_size = 0;
+            uint32_t chunk = 512;
+            while (cfg_size < CFG_MAX_SIZE) {
+                uint32_t want = CFG_MAX_SIZE - cfg_size;
+                if (want > chunk) want = chunk;
+                if (dataslot_read(CFG_SLOT_ID, cfg_size,
+                                  (void *)DMA_BUFFER, want) != 0)
+                    break;
+                memcpy(sav_buf + cfg_size, SDRAM_UNCACHED(DMA_BUFFER), want);
+                cfg_size += want;
+            }
+            /* Trim trailing NULs */
+            while (cfg_size > 0 && sav_buf[cfg_size - 1] == '\0')
+                cfg_size--;
+        }
         if (cfg_size == 0) return NULL;
         FILE *f = alloc_file();
         if (!f) return NULL;
@@ -553,7 +590,7 @@ FILE *fopen(const char *pathname, const char *mode) {
         f->offset = 0;
         f->size = cfg_size;
         f->flags = 0;
-        f->data = sav_buf;  /* read from memory */
+        f->data = sav_buf;
         return f;
     }
 
@@ -600,8 +637,22 @@ int fclose(FILE *stream) {
         return -1;
     }
 
-    /* Config/save write-back: persist to SD card */
-    if ((stream->flags & FILE_FLAG_WRITE) && stream->offset > 0 && sav_write_sub_idx >= 0) {
+    /* Config write-back: persist to dedicated PSRAM region at 0x30060000.
+     * Bridge auto-saves to SD on shutdown (separate nonvolatile slot).
+     * Format: "PDCF" + uint32 size + raw data. */
+    if ((stream->flags & FILE_FLAG_CFG) && stream->offset > 0) {
+        volatile uint32_t *hdr = (volatile uint32_t *)CFG_PSRAM_UC;
+        uint32_t sz = stream->offset;
+        if (sz > CFG_PSRAM_SIZE - 8) sz = CFG_PSRAM_SIZE - 8;
+        CFG_PSRAM_UC[0] = 'P'; CFG_PSRAM_UC[1] = 'D';
+        CFG_PSRAM_UC[2] = 'C'; CFG_PSRAM_UC[3] = 'F';
+        hdr[1] = sz;
+        volatile uint8_t *dst = CFG_PSRAM_UC + 8;
+        for (uint32_t i = 0; i < sz; i++)
+            dst[i] = (uint8_t)sav_buf[i];
+    }
+    /* Save write-back: persist to PSRAM */
+    else if ((stream->flags & FILE_FLAG_WRITE) && stream->offset > 0 && sav_write_sub_idx >= 0) {
         sav_persist(sav_write_sub_idx, stream->offset);
         sav_write_sub_idx = -1;
     }

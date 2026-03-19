@@ -60,6 +60,16 @@
                 "address": "0x30000000",
                 "size_maximum": "0x60000",
                 "extensions": ["sav"]
+            },
+            {
+                "id": 6,
+                "name": "Settings",
+                "required": false,
+                "parameters": "0x84",
+                "nonvolatile": true,
+                "address": "0x30060000",
+                "size_maximum": "0x01000",
+                "extensions": ["cfg"]
             }
         ]
     }

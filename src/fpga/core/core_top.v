@@ -1581,10 +1581,19 @@ assign cpu_psram_rdata_valid = cpu_on_bank0 ? psram_mux_rdata_valid : psram1_rda
 // Our save slot ("Saves", id 5) is at array index 5 in data.json's data_slots[].
 // NES/PCEngine CD cores both write size here — without it, bridge sees 0 and
 // skips readback entirely (no .sav file created).
+// Datatable entries for both nonvolatile slots.
+// Alternates between writing save size and config size each clock cycle.
+reg datatable_sel;
 always @(posedge clk_74a) begin
     datatable_wren <= 1;
-    datatable_addr <= 5 * 2 + 1;    // slot index 5, size entry
-    datatable_data <= 32'h060000;   // 384KB = 6 × 64KB (matches data.json size_maximum)
+    datatable_sel  <= ~datatable_sel;
+    if (!datatable_sel) begin
+        datatable_addr <= 5 * 2 + 1;    // array index 5 (Saves), size entry
+        datatable_data <= 32'h060000;   // 384KB = 6 × 64KB
+    end else begin
+        datatable_addr <= 6 * 2 + 1;    // array index 6 (Settings), size entry
+        datatable_data <= 32'h001000;   // 4KB config
+    end
 end
 
 core_bridge_cmd icb (
