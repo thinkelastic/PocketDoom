@@ -195,8 +195,8 @@ reg [15:0] active_l = 16'h0;
 reg [15:0] active_r = 16'h0;
 always @(posedge clk_audio) begin
     if (audio_pop) begin
-        active_l <= filt_out_l;
-        active_r <= filt_out_r;
+        active_l <= mix_clamp_l;
+        active_r <= mix_clamp_r;
     end
 end
 

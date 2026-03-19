@@ -190,8 +190,17 @@ load_operator(int ch, const genmidi_op_t *op, int is_carrier)
 
     opl_write(0x20 + off, op->tremolo);          /* byte 0: AM/VIB/EGT/KSR/MULT */
     opl_write(0x40 + off, op->scale | 0x3F);   /* byte 4: KSL+TL, silent initially */
-    opl_write(0x60 + off, op->attack);          /* byte 1: Attack/Decay */
-    opl_write(0x80 + off, op->sustain);         /* byte 2: Sustain/Release */
+
+    /* Attack/Decay: cap attack rate at 11 for smoother note onset. */
+    int atk_rate = (op->attack >> 4) & 0x0F;
+    if (atk_rate > 11) atk_rate = 11;
+    opl_write(0x60 + off, (atk_rate << 4) | (op->attack & 0x0F));
+    /* Sustain/Release: slow down fast releases for smoother fade-out.
+     * Release rate (lower nibble): cap at 8 (out of 15). */
+    int rel_rate = op->sustain & 0x0F;
+    if (rel_rate > 8) rel_rate = 8;
+    opl_write(0x80 + off, (op->sustain & 0xF0) | rel_rate);
+
     opl_write(0xE0 + off, op->waveform);        /* byte 3: Waveform select */
 }
 
@@ -201,8 +210,12 @@ set_instrument(int ch, const genmidi_voice_t *v)
     load_operator(ch, &v->modulator, 0);
     load_operator(ch, &v->carrier, 1);
 
-    /* Feedback/connection + enable both stereo outputs */
-    opl_write(0xC0 + ch_base[ch], (v->feedback & 0x0F) | 0x30);
+    /* Feedback/connection + enable both stereo outputs.
+     * Cap feedback at 5 (out of 7) to reduce harshness. */
+    int fb = (v->feedback >> 1) & 0x07;
+    int conn = v->feedback & 0x01;
+    if (fb > 5) fb = 5;
+    opl_write(0xC0 + ch_base[ch], (fb << 1) | conn | 0x30);
 
     voices[ch].car_level  = v->carrier.level & 0x3F;
     voices[ch].mod_level  = v->modulator.level & 0x3F;
@@ -253,7 +266,7 @@ set_frequency(int ch, int note, int key_on)
     /* Shift very low notes up by an octave — OPL waveform stepping
      * is most audible below ~C2 (MIDI 36) where block=1 and the
      * phase accumulator advances slowly through the sine LUT. */
-    while (note < 36 && note > 0)
+    while (note < 37 && note > 0)
         note += 12;
 
     int semi  = note % 12;
@@ -342,6 +355,14 @@ note_on(int mus_channel, int note, int velocity)
         voice_key_off(idx);
 
     set_instrument(idx, &instr->voice[0]);
+
+    /* Percussion: drop pitch by 1 semitone for deeper thump. */
+    if (mus_channel == PERCUSSION_CHAN) {
+        play_note -= 1;
+        if (play_note < 0) play_note = 0;
+    }
+
+
     set_volume(idx, velocity);
     set_frequency(idx, play_note, 1);
 
