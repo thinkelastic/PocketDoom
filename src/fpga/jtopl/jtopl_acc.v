@@ -45,7 +45,12 @@ assign sum_en = op | con;
 assign op2x   = rhy2x ? {op_result, 1'b0} : {op_result[12],op_result};
 
 // Continuous output
-jtopl_single_acc #(.INW(14),.OUTW(16))  u_acc(
+// ACCW raised from default 17 to 20: 9 FM channels of 14-bit operators
+// can sum to 73,719 which overflows a 17-bit signed accumulator (max 65,535).
+// With additive channels or rhythm doubling the sum can reach 18-19 bits.
+// A 17-bit wrap causes the saturation logic to clamp to the WRONG polarity,
+// producing phase-inverted output on loud passages (farty bass).
+jtopl_single_acc #(.INW(14),.OUTW(16),.ACCW(20))  u_acc(
     .clk        ( clk       ),
     .cenop      ( cenop     ),
     .op_result  ( op2x      ),

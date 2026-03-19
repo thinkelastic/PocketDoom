@@ -20,6 +20,7 @@ module audio_output (
 
     // OPL2 hardware audio input (from opl2_wrapper, clk_sys domain)
     input  wire signed [15:0] opl_audio_in,
+    input  wire               opl_toggle_in,   // toggles on each new OPL sample
 
     // I2S output
     output wire        audio_mclk,    // 12.288 MHz passthrough
@@ -122,24 +123,32 @@ end
 wire signed [15:0] sfx_l = fifo_empty ? hold_l : $signed(fifo_l);
 wire signed [15:0] sfx_r = fifo_empty ? hold_r : $signed(fifo_r);
 
-// CDC: double-register OPL audio from clk_sys into clk_audio domain
-// Safe: OPL value changes at ~50 kHz vs 12.288 MHz clock
-reg signed [15:0] opl_sync1, opl_sync2;
+// CDC: toggle-handshake for 16-bit OPL audio (clk_sys → clk_audio).
+// A simple double-register on a multi-bit bus can glitch when routing
+// skew causes different bits to be captured from different samples.
+// Instead, sync only the 1-bit toggle; when an edge is detected the
+// 16-bit data has been stable for 2+ clk_audio periods (~163 ns >>
+// any intra-FPGA routing skew) so it can be safely latched.
+reg        opl_tog_s1, opl_tog_s2, opl_tog_s3;
+reg signed [15:0] opl_latched;
 always @(posedge clk_audio) begin
-    opl_sync1 <= opl_audio_in;
-    opl_sync2 <= opl_sync1;
+    opl_tog_s1 <= opl_toggle_in;
+    opl_tog_s2 <= opl_tog_s1;
+    opl_tog_s3 <= opl_tog_s2;
+    if (opl_tog_s2 != opl_tog_s3)
+        opl_latched <= opl_audio_in;   // data stable — safe to latch
 end
 
-// Mix SFX + OPL into both L and R channels.
-wire signed [15:0] opl_scaled = opl_sync2;
+// Mix SFX + OPL into both L and R channels, then 2x boost.
+wire signed [15:0] opl_scaled = opl_latched;
 wire signed [16:0] mix_l = {sfx_l[15], sfx_l} + {opl_scaled[15], opl_scaled};
 wire signed [16:0] mix_r = {sfx_r[15], sfx_r} + {opl_scaled[15], opl_scaled};
 
-// Boost mixed output by 2x for better overall volume
+// 2x boost
 wire signed [17:0] boost_l = {mix_l[16], mix_l} <<< 1;
 wire signed [17:0] boost_r = {mix_r[16], mix_r} <<< 1;
 
-// Clamp boosted output to 16-bit signed
+// Clamp to 16-bit signed
 wire [15:0] mix_clamp_l = (boost_l > 18'sd32767)  ? 16'h7FFF :
                            (boost_l < -18'sd32768) ? 16'h8000 :
                            boost_l[15:0];
@@ -186,8 +195,8 @@ reg [15:0] active_l = 16'h0;
 reg [15:0] active_r = 16'h0;
 always @(posedge clk_audio) begin
     if (audio_pop) begin
-        active_l <= filt_out_l;
-        active_r <= filt_out_r;
+        active_l <= mix_clamp_l;
+        active_r <= mix_clamp_r;
     end
 end
 

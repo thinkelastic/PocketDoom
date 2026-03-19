@@ -1,7 +1,8 @@
 //
 // OPL2 hardware wrapper for PocketDoom
 // - Wraps jtopl2 (jotego) with bus-stalling MMIO interface
-// - Divide-by-28 clock enable for ~3.571 MHz cen from 100 MHz clk
+// - Divide-by-29 clock enable: 100.227 MHz / 29 = 3.456 MHz cen
+//   -> OPL sample rate = 3.456 MHz / 72 = 48,002 Hz (matches I2S)
 // - Write timing enforcement: 12 cen cycles after addr, 84 after data
 // - CPU bus stalls until opl_ack asserts
 //
@@ -17,11 +18,16 @@ module opl2_wrapper (
     input  wire [7:0]  opl_write_data,
     output reg         opl_ack,        // delayed ACK (stalls CPU until ready)
     // Audio output
-    output reg  signed [15:0] opl_audio_out
+    output reg  signed [15:0] opl_audio_out,
+    output reg                opl_sample_toggle  // toggles on each new sample (for CDC)
 );
 
 // ============================================
-// Clock enable: divide-by-28 -> 100 MHz / 28 = 3.571 MHz
+// Clock enable: divide-by-29 -> 100.227 MHz / 29 = 3.456 MHz
+// OPL sample rate = 3.456 MHz / 72 = 48,002 Hz — matches the 48 kHz
+// I2S output so no resampling is needed (eliminates aliasing artifacts).
+// F-number table in firmware is scaled up by 49716/48002 = 1.0357 to
+// compensate for the ~3.4% slower clock vs the standard 3.5795 MHz.
 // ============================================
 reg [4:0] cen_cnt;
 reg       cen;
@@ -31,7 +37,7 @@ always @(posedge clk or negedge reset_n) begin
         cen_cnt <= 5'd0;
         cen     <= 1'b0;
     end else begin
-        if (cen_cnt == 5'd27) begin
+        if (cen_cnt == 5'd28) begin
             cen_cnt <= 5'd0;
             cen     <= 1'b1;
         end else begin
@@ -143,12 +149,15 @@ end
 // ============================================
 // Audio output latch
 // ============================================
-// Latch on sample strobe — full 16-bit output, volume controlled in mixer
+// OPL sample rate ≈ 48,002 Hz (div-29), close enough to the 48 kHz
+// I2S clock that no resampling is needed — just latch directly.
 always @(posedge clk or negedge reset_n) begin
     if (!reset_n) begin
-        opl_audio_out <= 16'sd0;
+        opl_audio_out     <= 16'sd0;
+        opl_sample_toggle <= 1'b0;
     end else if (opl_sample) begin
-        opl_audio_out <= opl_snd;
+        opl_audio_out     <= opl_snd;
+        opl_sample_toggle <= ~opl_sample_toggle;
     end
 end
 

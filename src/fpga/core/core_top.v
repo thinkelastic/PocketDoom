@@ -715,10 +715,11 @@ end
 
 // OPL2 hardware interface
 wire        opl_write_req;
-wire        opl_write_addr;
+wire [1:0]  opl_write_addr;
 wire [7:0]  opl_write_data;
 wire        opl_ack;
 wire signed [15:0] opl_audio_out;
+wire               opl_sample_toggle;
 
 // Link MMIO register interface
 wire        link_reg_wr;
@@ -2282,16 +2283,18 @@ link_mmio #(
 );
 
 //
-// OPL2 hardware synthesizer
+// OPL3 hardware synthesizer (Greg Taylor's opl3_fpga, OPL2 compat mode)
 //
-opl2_wrapper opl2 (
+opl3_wrapper opl3 (
     .clk            (clk_cpu),
+    .clk_opl        (clk_core_12288),
     .reset_n        (reset_n),
     .opl_write_req  (opl_write_req),
     .opl_write_addr (opl_write_addr),
     .opl_write_data (opl_write_data),
-    .opl_ack        (opl_ack),
-    .opl_audio_out  (opl_audio_out)
+    .opl_ack            (opl_ack),
+    .opl_audio_out      (opl_audio_out),
+    .opl_sample_toggle  (opl_sample_toggle)
 );
 
 //
@@ -2324,7 +2327,8 @@ audio_output audio_out (
     .fifo_level   (audio_fifo_level),
     .fifo_full    (audio_fifo_full),
 
-    .opl_audio_in (opl_audio_out),
+    .opl_audio_in     (opl_audio_out),
+    .opl_toggle_in    (opl_sample_toggle),
 
     .audio_mclk   (audio_mclk),
     .audio_lrck   (audio_lrck),

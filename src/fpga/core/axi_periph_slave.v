@@ -97,7 +97,7 @@ module axi_periph_slave (
 
     // OPL2 hardware interface
     output reg         opl_write_req,
-    output reg         opl_write_addr,
+    output reg  [1:0]  opl_write_addr,
     output reg  [7:0]  opl_write_data,
     input wire         opl_ack,
 
@@ -601,7 +601,7 @@ always @(posedge clk or posedge reset) begin
                     else if (aw_dec_opl && |s_axi_wstrb) begin
                         // OPL2 write: issue request and wait for ack
                         opl_write_req <= 1;
-                        opl_write_addr <= aw_addr[2];
+                        opl_write_addr <= aw_addr[3:2];
                         opl_write_data <= s_axi_wdata[7:0];
                         opl_req_pending <= 1;
                         state <= S_OPL_WAIT;
@@ -732,7 +732,7 @@ always @(posedge clk or posedge reset) begin
                     state <= S_TERM;
                 end else if (reg_opl && |s_axi_wstrb) begin
                     opl_write_req <= 1;
-                    opl_write_addr <= req_addr[2];
+                    opl_write_addr <= req_addr[3:2];
                     opl_write_data <= s_axi_wdata[7:0];
                     opl_req_pending <= 1;
                     state <= S_OPL_WAIT;
