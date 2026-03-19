@@ -135,13 +135,17 @@ wire signed [15:0] opl_scaled = opl_sync2;
 wire signed [16:0] mix_l = {sfx_l[15], sfx_l} + {opl_scaled[15], opl_scaled};
 wire signed [16:0] mix_r = {sfx_r[15], sfx_r} + {opl_scaled[15], opl_scaled};
 
-// Clamp to 16-bit signed
-wire [15:0] mix_clamp_l = (mix_l > 17'sd32767)  ? 16'h7FFF :
-                           (mix_l < -17'sd32768) ? 16'h8000 :
-                           mix_l[15:0];
-wire [15:0] mix_clamp_r = (mix_r > 17'sd32767)  ? 16'h7FFF :
-                           (mix_r < -17'sd32768) ? 16'h8000 :
-                           mix_r[15:0];
+// Boost mixed output by 2x for better overall volume
+wire signed [17:0] boost_l = {mix_l[16], mix_l} <<< 1;
+wire signed [17:0] boost_r = {mix_r[16], mix_r} <<< 1;
+
+// Clamp boosted output to 16-bit signed
+wire [15:0] mix_clamp_l = (boost_l > 18'sd32767)  ? 16'h7FFF :
+                           (boost_l < -18'sd32768) ? 16'h8000 :
+                           boost_l[15:0];
+wire [15:0] mix_clamp_r = (boost_r > 18'sd32767)  ? 16'h7FFF :
+                           (boost_r < -18'sd32768) ? 16'h8000 :
+                           boost_r[15:0];
 
 // ============================================
 // IIR low-pass filter + DC blocker + audio mix
@@ -154,8 +158,8 @@ audio_filters #(.CLK_RATE(12288000)) audio_filt (
     .clk       (clk_audio),
     .reset     (~reset_n),
 
-    // Filter coefficients — "Default" preset (low-pass)
-    .flt_rate  (32'd7056000),
+    // Filter coefficients — gentle low-pass (~8 kHz cutoff)
+    .flt_rate  (32'd11000000),
     .cx        (40'd4258969),
     .cx0       (8'd3),
     .cx1       (8'd3),

@@ -223,6 +223,7 @@ doom_music.o: doom_music.c
 doom_net.o: doom_net.c
 	$(CC) $(DOOM_CFLAGS) -c -o $@ $<
 
+
 # Assemble assembly sources
 %.o: %.S
 	$(AS) $(ASFLAGS) -c -o $@ $<

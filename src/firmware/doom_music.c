@@ -16,6 +16,7 @@
 #include "sounds.h"
 #include "w_wad.h"
 #include "z_zone.h"
+
 /* Hardware OPL2 MMIO registers */
 #define OPL2_ADDR  (*(volatile uint32_t *)0x4E000000)
 #define OPL2_DATA  (*(volatile uint32_t *)0x4E000004)
@@ -158,8 +159,8 @@ static int music_volume = 127;  /* 0-127 internal */
 PD_FASTTEXT static inline void
 opl_write(uint16_t reg, uint8_t val)
 {
-    OPL2_ADDR = (uint32_t)(reg & 0xFF);  /* Bus stalls ~3.4 us */
-    OPL2_DATA = (uint32_t)val;            /* Bus stalls ~23.5 us */
+    OPL2_ADDR = (uint32_t)(reg & 0xFF);
+    OPL2_DATA = (uint32_t)val;
 }
 
 PD_FASTTEXT static void
@@ -167,11 +168,11 @@ load_operator(int ch, const genmidi_op_t *op, int is_carrier)
 {
     int off = is_carrier ? op2_off[ch] : op1_off[ch];
 
-    opl_write(0x20 + off, op->tremolo);
-    opl_write(0x40 + off, (op->scale << 6) | 0x3F);   /* Silent initially */
+    opl_write(0xE0 + off, op->tremolo);          /* byte 0 = waveform select */
+    opl_write(0x40 + off, op->scale | 0x3F);   /* byte 4 = KSL+TL, silent initially */
     opl_write(0x60 + off, op->attack);
     opl_write(0x80 + off, op->sustain);
-    opl_write(0xE0 + off, op->waveform & 0x07);
+    opl_write(0x20 + off, op->waveform);       /* byte 3 = AM/VIB/EGT/KSR/MULT */
 }
 
 PD_FASTTEXT static void
@@ -185,9 +186,10 @@ set_instrument(int ch, const genmidi_voice_t *v)
 
     voices[ch].car_level  = v->carrier.level & 0x3F;
     voices[ch].mod_level  = v->modulator.level & 0x3F;
-    voices[ch].car_scale  = v->carrier.scale & 0x03;
-    voices[ch].mod_scale  = v->modulator.scale & 0x03;
+    voices[ch].car_scale  = v->carrier.scale & 0xC0;
+    voices[ch].mod_scale  = v->modulator.scale & 0xC0;
     voices[ch].connection = v->feedback & 0x01;
+
 }
 
 PD_FASTTEXT static void
@@ -200,16 +202,16 @@ set_volume(int ch, int velocity)
     /* Carrier: scale "loudness" portion by velocity */
     int car_tl = 0x3F - ((0x3F - voices[ch].car_level) * vol) / 128;
     opl_write(0x40 + op2_off[ch],
-              (voices[ch].car_scale << 6) | (car_tl & 0x3F));
+              voices[ch].car_scale | (car_tl & 0x3F));
 
     /* Modulator: adjust only in additive mode; keep GENMIDI value in FM */
     if (voices[ch].connection) {
         int mod_tl = 0x3F - ((0x3F - voices[ch].mod_level) * vol) / 128;
         opl_write(0x40 + op1_off[ch],
-                  (voices[ch].mod_scale << 6) | (mod_tl & 0x3F));
+                  voices[ch].mod_scale | (mod_tl & 0x3F));
     } else {
         opl_write(0x40 + op1_off[ch],
-                  (voices[ch].mod_scale << 6) | (voices[ch].mod_level & 0x3F));
+                  voices[ch].mod_scale | (voices[ch].mod_level & 0x3F));
     }
 }
 
@@ -354,8 +356,10 @@ load_genmidi(void)
     }
 
     memcpy(genmidi, data + 8, GENMIDI_NUM_INSTRS * sizeof(genmidi_instr_t));
+
     Z_Free(data);
     genmidi_loaded = 1;
+
     printf("I_InitMusic: loaded %d instruments\n", GENMIDI_NUM_INSTRS);
 }
 
@@ -494,10 +498,11 @@ OPL_AdvanceMusic(void)
 
     /* Convert elapsed CPU cycles to 11025 Hz samples in 16.8 fixed-point.
      * samples_fp = elapsed * SAMPLERATE * 256 / CPU_HZ
-     * = elapsed * 11025 * 256 / 100000000
-     * = elapsed * 2822400 / 100000000
-     * ≈ elapsed * 2822 / 100000  (avoid 32-bit overflow) */
-    int samples_fp = (int)((uint64_t)elapsed * 2822400 / 100000000);
+     * Carry over fractional remainder to prevent progressive drift. */
+    static uint32_t mus_frac_accum = 0;
+    uint64_t total = (uint64_t)elapsed * 2822400 + mus_frac_accum;
+    int samples_fp = (int)(total / 100227260);
+    mus_frac_accum = (uint32_t)(total % 100227260);
 
     /* Cap at ~100ms worth to prevent burst after long stalls */
     if (samples_fp > 1102 * 256)
@@ -545,6 +550,7 @@ void
 I_ShutdownMusic(void)
 {
 }
+
 
 void
 I_SetMusicVolume(int volume)
