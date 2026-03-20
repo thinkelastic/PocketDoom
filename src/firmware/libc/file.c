@@ -660,13 +660,14 @@ int fclose(FILE *stream) {
 
     /* Config write-back: persist to dedicated PSRAM region at 0x30060000.
      * Bridge auto-saves to SD on shutdown (separate nonvolatile slot).
-     * Raw config text, zero-filled remainder. Readable and hand-editable. */
+     * Update datatable with actual size so the .cfg file has no padding. */
     if ((stream->flags & FILE_FLAG_CFG) && stream->offset > 0) {
         uint32_t sz = stream->offset;
         if (sz > CFG_PSRAM_SIZE) sz = CFG_PSRAM_SIZE;
         volatile uint8_t *dst = CFG_PSRAM_UC;
         for (uint32_t i = 0; i < sz; i++)
             dst[i] = (uint8_t)sav_buf[i];
+        /* Zero-fill remainder for clean validation on next boot */
         for (uint32_t i = sz; i < CFG_PSRAM_SIZE; i++)
             dst[i] = 0;
     }

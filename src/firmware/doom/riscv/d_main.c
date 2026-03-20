@@ -279,16 +279,12 @@ void D_Display (void)
     }
 
     // see if the border needs to be updated to the screen
+    // Always redraw when viewport < full width — double buffering means
+    // both framebuffers need the border, and the 3D renderer doesn't
+    // touch the border area so it stays black without this.
     if (gamestate == GS_LEVEL && !automapactive && scaledviewwidth != 320)
     {
-        if (menuactive || menuactivestate || !viewactivestate)
-            borderdrawcount = 3;
-        if (borderdrawcount)
-        {
-            R_DrawViewBorder ();    // erase old menu stuff
-            borderdrawcount--;
-        }
-
+        R_DrawViewBorder ();
     }
 
     menuactivestate = menuactive;

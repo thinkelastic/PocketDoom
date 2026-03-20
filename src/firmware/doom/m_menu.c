@@ -2150,7 +2150,8 @@ void M_Drawer (void)
 void M_ClearMenus (void)
 {
     menuactive = 0;
-    M_SaveDefaults();  /* Persist settings to PSRAM on menu close */
+    R_FillBackScreen();    /* Redraw viewport border (menu may have covered it) */
+    M_SaveDefaults();      /* Persist settings to PSRAM */
 }
 
 

@@ -648,9 +648,9 @@ void R_FillBackScreen (void)
         name = name1;
 
     src = W_CacheLumpName (name, PU_CACHE);
-    dest = screens[1];
+    dest = screens[1] + RENDER_YOFF * SCREENWIDTH;
 
-    for (y=0 ; y<SCREENHEIGHT-SBARHEIGHT ; y++)
+    for (y=0 ; y<RENDER_HEIGHT-SBARHEIGHT ; y++)
     {
         for (x=0 ; x<SCREENWIDTH/64 ; x++)
         {
@@ -665,43 +665,31 @@ void R_FillBackScreen (void)
         }
     }
 
+    int vy = viewwindowy;
+
     patch = W_CacheLumpName ("brdr_t",PU_CACHE);
-
     for (x=0 ; x<scaledviewwidth ; x+=8)
-        V_DrawPatch (viewwindowx+x,viewwindowy-8,1,patch);
+        V_DrawPatch (viewwindowx+x,vy-8,1,patch);
+
     patch = W_CacheLumpName ("brdr_b",PU_CACHE);
-
     for (x=0 ; x<scaledviewwidth ; x+=8)
-        V_DrawPatch (viewwindowx+x,viewwindowy+viewheight,1,patch);
+        V_DrawPatch (viewwindowx+x,vy+viewheight,1,patch);
+
     patch = W_CacheLumpName ("brdr_l",PU_CACHE);
-
     for (y=0 ; y<viewheight ; y+=8)
-        V_DrawPatch (viewwindowx-8,viewwindowy+y,1,patch);
+        V_DrawPatch (viewwindowx-8,vy+y,1,patch);
+
     patch = W_CacheLumpName ("brdr_r",PU_CACHE);
-
     for (y=0 ; y<viewheight ; y+=8)
-        V_DrawPatch (viewwindowx+scaledviewwidth,viewwindowy+y,1,patch);
+        V_DrawPatch (viewwindowx+scaledviewwidth,vy+y,1,patch);
 
-
-    // Draw beveled edge.
-    V_DrawPatch (viewwindowx-8,
-                 viewwindowy-8,
-                 1,
+    V_DrawPatch (viewwindowx-8, vy-8, 1,
                  W_CacheLumpName ("brdr_tl",PU_CACHE));
-
-    V_DrawPatch (viewwindowx+scaledviewwidth,
-                 viewwindowy-8,
-                 1,
+    V_DrawPatch (viewwindowx+scaledviewwidth, vy-8, 1,
                  W_CacheLumpName ("brdr_tr",PU_CACHE));
-
-    V_DrawPatch (viewwindowx-8,
-                 viewwindowy+viewheight,
-                 1,
+    V_DrawPatch (viewwindowx-8, vy+viewheight, 1,
                  W_CacheLumpName ("brdr_bl",PU_CACHE));
-
-    V_DrawPatch (viewwindowx+scaledviewwidth,
-                 viewwindowy+viewheight,
-                 1,
+    V_DrawPatch (viewwindowx+scaledviewwidth, vy+viewheight, 1,
                  W_CacheLumpName ("brdr_br",PU_CACHE));
 }
 
@@ -746,18 +734,19 @@ void R_DrawViewBorder (void)
     if (scaledviewwidth == 320)
         return;
 
-    top = ((SCREENHEIGHT-SBARHEIGHT)-viewheight)/2;
+    int yoff = RENDER_YOFF;
+    top = ((RENDER_HEIGHT-SBARHEIGHT)-viewheight)/2;
     side = (SCREENWIDTH-scaledviewwidth)/2;
 
     // copy top and one line of left side
-    R_VideoErase (0, top*SCREENWIDTH+side);
+    R_VideoErase (yoff*SCREENWIDTH, top*SCREENWIDTH+side);
 
     // copy one line of right side and bottom
-    ofs = (viewheight+top)*SCREENWIDTH-side;
+    ofs = (yoff+viewheight+top)*SCREENWIDTH-side;
     R_VideoErase (ofs, top*SCREENWIDTH+side);
 
     // copy sides using wraparound
-    ofs = top*SCREENWIDTH + SCREENWIDTH-side;
+    ofs = (yoff+top)*SCREENWIDTH + SCREENWIDTH-side;
     side <<= 1;
 
     for (i=1 ; i<viewheight ; i++)
@@ -766,8 +755,7 @@ void R_DrawViewBorder (void)
         ofs += SCREENWIDTH;
     }
 
-    // ?
-    V_MarkRect (0,0,SCREENWIDTH, SCREENHEIGHT-SBARHEIGHT);
+    V_MarkRect (0, yoff, SCREENWIDTH, RENDER_HEIGHT-SBARHEIGHT);
 }
 
 
