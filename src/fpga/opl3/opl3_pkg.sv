@@ -46,20 +46,23 @@
 package opl3_pkg;
     /*
      * Original OPL3 used a 14.31818MHz master clock, divided by 288 giving a
-     * sample clock of 49.7159KHz. Since our SSM2603 DAC uses fixed 256
-     * oversampling, we'll use a 12.727MHz master clock which is the closest
-     * value we can generate using an MMCM and 125MHz input clock. This will
-     * give us a 49.7148KHz sample clock. We don't have to worry about clock
-     * domain crossings.
+     * sample clock of 49715.9Hz. We target the same rate so vibrato (6.07Hz),
+     * tremolo (3.7Hz) and envelope timers match real hardware.
+     *
+     * With a 12.288MHz master clock, dividing by 247 gives 49728.7Hz — only
+     * 0.026% from authentic. The I2S DAC still runs at 48kHz (its own ÷256
+     * divider in audio_output); the OPL3 output is latched via toggle-
+     * handshake CDC, so the small rate difference is absorbed transparently
+     * as nearest-neighbour resampling.
      */
-    localparam CLK_FREQ = 12_288_000;   // Audio master clock — matches I2S exactly
+    localparam CLK_FREQ = 12_288_000;   // Audio master clock (shared with I2S)
     localparam DAC_OUTPUT_WIDTH = 24;
     localparam INSTANTIATE_TIMERS = 0;
     localparam NUM_LEDS = 4;
     localparam INSTANTIATE_SAMPLE_SYNC_TO_DAC_CLK = 0;
 
-    localparam DESIRED_SAMPLE_FREQ = 48_000;
-    localparam CLK_DIV_COUNT = 256;    // 12,288,000 / 256 = exactly 48,000 Hz
+    localparam DESIRED_SAMPLE_FREQ = 49_716;
+    localparam CLK_DIV_COUNT = 247;    // 12,288,000 / 247 = 49,728.7 Hz (~49.716 kHz authentic)
     localparam ACTUAL_SAMPLE_FREQ = CLK_FREQ/CLK_DIV_COUNT;
 
     localparam NUM_REG_PER_BANK = 'hF6;

@@ -89,7 +89,7 @@ module calc_phase_inc
 
     always_ff @(posedge clk) begin
         pre_mult_p1 <= pre_mult_p0;
-        post_mult_p2 <= (pre_mult_p1*multiplier_p1) >> 1;
+        post_mult_p2 <= pre_mult_p1*multiplier_p1;
     end
 
     pipeline_sr #(

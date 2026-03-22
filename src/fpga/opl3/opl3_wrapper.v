@@ -3,7 +3,8 @@
 // - Wraps Greg Taylor's opl3_fpga (YMF262, bit-true reverse-engineered)
 // - Provides the same CPU MMIO interface as the old opl2_wrapper
 // - OPL3 runs in OPL2 compatibility mode (bank 0 only)
-// - Synthesis clock: 12.288 MHz -> 48 kHz sample rate (exact, no resampling)
+// - Synthesis clock: 12.288 MHz -> ~49.7 kHz sample rate (authentic OPL3 rate)
+// - I2S DAC stays at 48 kHz; OPL3 output latched via toggle CDC
 // - 24-bit stereo output scaled to 16-bit signed for mixer
 //
 
@@ -113,7 +114,7 @@ wire        [3:0]  opl3_led;
 wire               opl3_irq_n;
 
 opl3 opl3_core (
-    .clk        (clk_opl),       // 12.288 MHz — ÷256 = exactly 48 kHz (matches I2S)
+    .clk        (clk_opl),       // 12.288 MHz — ÷247 = 49,728.7 Hz (authentic OPL3 rate)
     .clk_host   (clk),           // 100 MHz for register writes
     .clk_dac    (clk_opl),       // unused (INSTANTIATE_SAMPLE_SYNC_TO_DAC_CLK=0)
     .ic_n       (reset_n),
@@ -133,7 +134,7 @@ opl3 opl3_core (
 // ============================================
 // Audio output latch (clk_opl domain)
 // ============================================
-// OPL3 outputs 24-bit signed stereo at 48 kHz on clk_opl.
+// OPL3 outputs 24-bit signed stereo at ~49.7 kHz on clk_opl.
 // Same clock domain as audio_output's clk_audio — no CDC needed.
 always @(posedge clk_opl or negedge reset_n) begin
     if (!reset_n) begin

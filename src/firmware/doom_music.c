@@ -16,6 +16,7 @@
 #include "sounds.h"
 #include "w_wad.h"
 #include "z_zone.h"
+#include "dataslot.h"
 
 /* Hardware OPL3 MMIO registers (bank 0 + bank 1) */
 #define OPL_ADDR0  (*(volatile uint32_t *)0x4E000000)  /* Bank 0 address */
@@ -100,13 +101,16 @@ static const uint16_t ch_base[18] = {
 typedef struct {
     int     active;
     int     mus_channel;
-    int     note;
+    int     note;            /* Original MIDI note (for note-off matching) */
+    int     play_note;       /* Actual note after offsets (for pitch bend) */
     int     instrument;
+    uint8_t fine_tune;       /* GENMIDI fine_tune (0-127) */
     uint8_t car_level;       /* Carrier TL from GENMIDI (0-63) */
     uint8_t mod_level;       /* Modulator TL from GENMIDI (0-63) */
     uint8_t car_scale;       /* Carrier KSL (0-3) */
     uint8_t mod_scale;       /* Modulator KSL (0-3) */
     uint8_t connection;      /* 0 = FM, 1 = additive */
+    int8_t  double_pair;     /* Index of paired double-voice, or -1 */
 } voice_t;
 
 static voice_t voices[NUM_OPL_VOICES];
@@ -114,14 +118,13 @@ static uint8_t voice_reg_b0[NUM_OPL_VOICES];   /* Cached 0xB0 register */
 
 /* ============================================
  * OPL F-number table (one octave: C..B)
- * Scaled for 48,000 Hz sample rate (12.288 MHz / 256).
- * freq = fnum * 48000 / 2^(20 - block)
- * Standard values × 49716/48000 = 1.0357
+ * Standard OPL2/OPL3 values for ~49716 Hz sample rate.
+ * freq = fnum * mult * fsam / 2^(20 - block)
  * ============================================ */
 
 static const uint16_t fnum_table[12] = {
-    0x163, 0x178, 0x18F, 0x1A7, 0x1BF, 0x1DA,
-    0x1F6, 0x214, 0x234, 0x256, 0x279, 0x29E
+    0x157, 0x16B, 0x181, 0x198, 0x1B0, 0x1CA,
+    0x1E5, 0x202, 0x220, 0x241, 0x263, 0x287
 };
 
 /* ============================================
@@ -188,20 +191,11 @@ load_operator(int ch, const genmidi_op_t *op, int is_carrier)
 {
     int off = is_carrier ? op2_off[ch] : op1_off[ch];
 
-    opl_write(0x20 + off, op->tremolo);          /* byte 0: AM/VIB/EGT/KSR/MULT */
-    opl_write(0x40 + off, op->scale | 0x3F);   /* byte 4: KSL+TL, silent initially */
-
-    /* Attack/Decay: cap attack rate at 11 for smoother note onset. */
-    int atk_rate = (op->attack >> 4) & 0x0F;
-    if (atk_rate > 11) atk_rate = 11;
-    opl_write(0x60 + off, (atk_rate << 4) | (op->attack & 0x0F));
-    /* Sustain/Release: slow down fast releases for smoother fade-out.
-     * Release rate (lower nibble): cap at 8 (out of 15). */
-    int rel_rate = op->sustain & 0x0F;
-    if (rel_rate > 8) rel_rate = 8;
-    opl_write(0x80 + off, (op->sustain & 0xF0) | rel_rate);
-
-    opl_write(0xE0 + off, op->waveform);        /* byte 3: Waveform select */
+    opl_write(0x20 + off, op->tremolo);
+    opl_write(0x40 + off, (op->scale & 0xC0) | (op->level & 0x3F));
+    opl_write(0x60 + off, op->attack);
+    opl_write(0x80 + off, op->sustain);
+    opl_write(0xE0 + off, op->waveform);
 }
 
 PD_FASTTEXT static void
@@ -210,11 +204,9 @@ set_instrument(int ch, const genmidi_voice_t *v)
     load_operator(ch, &v->modulator, 0);
     load_operator(ch, &v->carrier, 1);
 
-    /* Feedback/connection + enable both stereo outputs.
-     * Cap feedback at 5 (out of 7) to reduce harshness. */
+    /* Feedback/connection + enable both stereo outputs. */
     int fb = (v->feedback >> 1) & 0x07;
     int conn = v->feedback & 0x01;
-    if (fb > 5) fb = 5;
     opl_write(0xC0 + ch_base[ch], (fb << 1) | conn | 0x30);
 
     voices[ch].car_level  = v->carrier.level & 0x3F;
@@ -225,13 +217,25 @@ set_instrument(int ch, const genmidi_voice_t *v)
 
 }
 
+/* Scale GENMIDI operator level by dynamic volume (0-63).
+ *   op_volume = 0x3F - op_level        (convert TL attenuation to loudness)
+ *   scaled    = (op_volume * vol) / 63  (attenuate by dynamic volume 0-63)
+ *   result    = 0x3F - scaled           (back to TL attenuation)            */
+static inline int
+calc_volume(int op_level, int vol)
+{
+    int op_vol = 0x3F - (op_level & 0x3F);
+    int scaled = (op_vol * vol) / 0x3F;
+    if (scaled > 0x3F) scaled = 0x3F;
+    return 0x3F - scaled;
+}
+
 PD_FASTTEXT static void
 set_volume(int ch, int velocity)
 {
     /* Match Chocolate Doom's volume calculation (i_oplmusic.c SetVoiceVolume):
      *   midi_volume = 2 * (volume_curve[min(chan_vol, music_vol)] + 1)
      *   full_volume = (volume_curve[note_vel] * midi_volume) >> 9
-     *   carrier TL  = 0x3F - full_volume                          (0..63)
      * MUS uses a single volume for both channel and note velocity. */
     int vel = velocity & 0x7F;
     int capped = (vel > music_volume) ? music_volume : vel;
@@ -239,19 +243,17 @@ set_volume(int ch, int velocity)
     int full_vol = (volume_curve[vel] * midi_vol) >> 9;
     if (full_vol > 0x3F) full_vol = 0x3F;
 
-    /* Carrier: pure volume control — ignores GENMIDI carrier TL
-     * (GENMIDI carrier TL was already written at instrument load). */
-    int car_tl = 0x3F - full_vol;
+    /* Carrier: scale GENMIDI carrier level by dynamic volume. */
+    int car_tl = calc_volume(voices[ch].car_level, full_vol);
     opl_write(0x40 + op2_off[ch],
               voices[ch].car_scale | (car_tl & 0x3F));
 
-    /* Modulator: in additive mode, never louder than GENMIDI intended.
-     * Use max(genmidi_mod_level, car_tl) — matches Chocolate Doom.
-     * In FM mode, keep GENMIDI value unchanged. */
+    /* Modulator: in additive mode (connection=1), both operators produce
+     * output so modulator volume must also track dynamic volume.
+     * In FM mode (connection=0), modulator controls timbre — use
+     * GENMIDI value unchanged. */
     if (voices[ch].connection) {
-        int mod_tl = voices[ch].mod_level;
-        if (mod_tl < car_tl)
-            mod_tl = car_tl;
+        int mod_tl = calc_volume(voices[ch].mod_level, full_vol);
         opl_write(0x40 + op1_off[ch],
                   voices[ch].mod_scale | (mod_tl & 0x3F));
     } else {
@@ -260,18 +262,26 @@ set_volume(int ch, int velocity)
     }
 }
 
+/* Set OPL frequency.  ft_signed is in 1/64 semitone units (signed):
+ *   0 = no detuning, +64 = +1 semitone, -64 = -1 semitone.
+ * Matches DMX where freq_sub = fine_tuning/2 and 32 sub-steps = 1 semi. */
 PD_FASTTEXT static void
-set_frequency(int ch, int note, int key_on)
+set_frequency(int ch, int note, int ft_signed, int key_on)
 {
-    /* Shift very low notes up by an octave — OPL waveform stepping
-     * is most audible below ~C2 (MIDI 36) where block=1 and the
-     * phase accumulator advances slowly through the sine LUT. */
-    while (note < 37 && note > 0)
-        note += 12;
+    /* Normalize signed fine_tune → integer semitone offset + fraction 0-63 */
+    while (ft_signed >= 64) { note++; ft_signed -= 64; }
+    while (ft_signed < 0)   { note--; ft_signed += 64; }
 
     int semi  = note % 12;
     int block = (note / 12) - 1;
     uint16_t fnum = fnum_table[semi];
+
+    /* Interpolate sub-semitone fraction toward the next semitone's fnum. */
+    if (ft_signed > 0) {
+        uint16_t fnum_next = (semi < 11) ? fnum_table[semi + 1]
+                                         : fnum_table[0] * 2;
+        fnum += ((fnum_next - fnum) * ft_signed) / 64;
+    }
 
     if (block < 0) {
         fnum >>= (-block);
@@ -317,6 +327,36 @@ alloc_voice(int mus_channel)
 }
 
 /* ============================================
+ * Pitch bend
+ * ============================================ */
+
+/* Apply pitch bend to a single OPL voice.
+ * MUS bend value: 0-255, center=128.  Range: +/- 2 semitones.
+ * We adjust the f-number by interpolating within the fnum_table. */
+PD_FASTTEXT static void
+apply_pitch_bend(int ch, int bend)
+{
+    if (!voices[ch].active) return;
+
+    int note = voices[ch].play_note;
+
+    /* Center fine_tune at 128: GENMIDI value 128 = no detuning.
+     * 64 units = 1 semitone (DMX: freq_sub=fine_tuning/2, 32 sub = 1 semi). */
+    int ft = (int)voices[ch].fine_tune - 128;  /* -128..+127 in 1/64 semi */
+
+    /* MUS bend: 0-255, center=128, range +/- 2 semitones.
+     * (bend-128) ranges -128..+127 = +/- 2 semitones at 64 units/semi. */
+    int bend_fine = bend - 128;
+
+    /* Combined detuning in 1/64 semitone units */
+    int total = ft + bend_fine;
+
+    /* set_frequency handles normalization (signed → note offset + fraction) */
+    int key_on = (voice_reg_b0[ch] & 0x20) ? 1 : 0;
+    set_frequency(ch, note, total, key_on);
+}
+
+/* ============================================
  * Note on / off
  * ============================================ */
 
@@ -342,10 +382,12 @@ note_on(int mus_channel, int note, int velocity)
 
     instr = &genmidi[instr_idx];
 
+    int base_note = play_note;
     if (instr->flags & GENMIDI_FLAG_FIXED)
-        play_note = instr->fixed_note;
+        base_note = instr->fixed_note;
 
-    play_note += instr->voice[0].base_note_offset;
+    /* --- Primary voice (voice[0]) --- */
+    play_note = base_note + instr->voice[0].base_note_offset;
     if (play_note < 0)   play_note = 0;
     if (play_note > 127) play_note = 127;
 
@@ -355,28 +397,22 @@ note_on(int mus_channel, int note, int velocity)
         voice_key_off(idx);
 
     set_instrument(idx, &instr->voice[0]);
-
-    /* Percussion: drop pitch by 1 semitone for deeper thump. */
-    if (mus_channel == PERCUSSION_CHAN) {
-        play_note -= 1;
-        if (play_note < 0) play_note = 0;
-    }
-
-
     set_volume(idx, velocity);
-    set_frequency(idx, play_note, 1);
+    set_frequency(idx, play_note, (int)instr->fine_tune - 128, 1);
 
     voices[idx].active      = 1;
     voices[idx].mus_channel = mus_channel;
     voices[idx].note        = note;
+    voices[idx].play_note   = play_note;
+    voices[idx].fine_tune   = instr->fine_tune;
     voices[idx].instrument  = instr_idx;
+    voices[idx].double_pair = -1;
 }
 
 PD_FASTTEXT static void
 note_off(int mus_channel, int note)
 {
-    int i;
-    for (i = 0; i < NUM_OPL_VOICES; i++) {
+    for (int i = 0; i < NUM_OPL_VOICES; i++) {
         if (voices[i].active
             && voices[i].mus_channel == mus_channel
             && voices[i].note == note) {
@@ -420,7 +456,6 @@ load_genmidi(void)
 
     Z_Free(data);
     genmidi_loaded = 1;
-
     printf("I_InitMusic: loaded %d instruments\n", GENMIDI_NUM_INSTRS);
 }
 
@@ -485,6 +520,11 @@ mus_process_events(void)
             b1 = mus_read_byte();
             if (b1 < 0) { mus_playing = 0; return; }
             mus_chan_pitch[channel] = b1;
+            /* Apply bend to all active voices on this channel */
+            for (int v = 0; v < NUM_OPL_VOICES; v++) {
+                if (voices[v].active && voices[v].mus_channel == channel)
+                    apply_pitch_bend(v, b1);
+            }
             break;
 
         case 3: /* System event */
@@ -642,10 +682,12 @@ I_InitMusic(void)
     opl_write(0x08, 0x40);
     opl_write(0x108, 0x40);
 
-    /* Shallow tremolo + vibrato */
+    /* Tremolo + vibrato depth: both off (shallow). */
     opl_write(0xBD, 0x00);
 
     memset(voices, 0, sizeof(voices));
+    for (i = 0; i < NUM_OPL_VOICES; i++)
+        voices[i].double_pair = -1;
     memset(voice_reg_b0, 0, sizeof(voice_reg_b0));
 
     for (i = 0; i < MUS_CHANNELS; i++) {
