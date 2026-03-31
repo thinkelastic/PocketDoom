@@ -95,10 +95,11 @@ copy-firmware:
 	@echo "Copying doom.bin..."
 	cp $(FIRMWARE_SOURCE) $(FIRMWARE_TARGET)
 
-# Copy default config
+# Copy default config and OPL3 tuning
 copy-config:
-	@echo "Copying default.cfg..."
+	@echo "Copying config files..."
 	cp dist/common/default.cfg $(RELEASE_ASSETS_DIR)/default.cfg
+	cp dist/common/opl3.opl $(RELEASE_ASSETS_DIR)/opl3.opl
 
 # Copy JSON configuration files
 copy-json:

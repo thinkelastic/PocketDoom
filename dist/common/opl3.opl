@@ -1,0 +1,64 @@
+# PocketDoom OPL3 Synthesizer Tuning
+#
+# This file controls how the hardware YMF262 FM synth renders music.
+# Edit values to taste — changes take effect on next boot.
+#
+# Format:  category  attack  release  feedback  pitch  bass_floor
+#
+#   attack:     Max attack rate 0-15. Lower = smoother note onset.
+#               15 = original (instant), 11 = default.
+#   release:    Max release rate 0-15. Lower = longer fade-out.
+#               15 = original (instant), 8 = default.
+#   feedback:   Max operator self-feedback 0-7. Lower = warmer/smoother.
+#               7 = original (harsh), 5 = default.
+#   pitch:      Semitone offset (-12 to +12). Negative = deeper.
+#   bass_floor: MIDI note below which pitches shift up an octave.
+#               Reduces OPL stepping on deep bass. 0 = disabled.
+#
+# Categories (General MIDI instrument groups):
+#   piano       0-7     Acoustic/Electric/Honky-Tonk Piano, Clavinet
+#   chromperc   8-15    Celesta, Glockenspiel, Music Box, Vibraphone
+#   organ       16-23   Drawbar/Percussive/Rock Organ, Accordion
+#   guitar      24-31   Acoustic/Electric/Distortion Guitar
+#   bass        32-39   Acoustic/Electric/Fretless/Slap/Synth Bass
+#   strings     40-47   Violin, Viola, Cello, Contrabass, Strings
+#   ensemble    48-55   String/Synth Ensemble, Choir Aahs/Oohs
+#   brass       56-63   Trumpet, Trombone, Tuba, French Horn
+#   reed        64-71   Soprano/Alto/Tenor/Baritone Sax, Oboe, Bassoon
+#   pipe        72-79   Piccolo, Flute, Recorder, Pan Flute, Ocarina
+#   synthlead   80-87   Square/Sawtooth/Calliope/Chiff/Charang Lead
+#   synthpad    88-95   New Age/Warm/Polysynth/Choir/Bowed Pad
+#   synthfx     96-103  Rain/Soundtrack/Crystal/Atmosphere FX
+#   ethnic      104-111 Sitar, Banjo, Shamisen, Koto, Kalimba
+#   percussive  112-119 Tinkle Bell, Agogo, Steel Drums, Taiko
+#   soundfx     120-127 Guitar Fret Noise, Seashore, Telephone
+#   drums       ---     All percussion (channel 10/16)
+#
+# Unlisted categories use the same defaults as 'piano'.
+#
+# Global settings:
+#   deep_tremolo  0 = subtle 1dB AM (default), 1 = dramatic 4.8dB
+#   deep_vibrato  0 = subtle 7 cents (default), 1 = wide 14 cents
+
+# --- Global ---
+deep_tremolo	0
+deep_vibrato	0
+
+#              attack  release  feedback  pitch  bass_floor
+piano          12      8        5         0      0
+chromperc      13      7        5         0      0
+organ          13      7        5         0      0
+guitar         11      8        5         0      0
+bass           11      6        4         0      37
+strings        12      6        5         0      0
+ensemble       12      6        5         0      0
+brass          12      8        5         0      0
+reed           12      8        5         0      0
+pipe           13      7        5         0      0
+synthlead      11      8        5         0      0
+synthpad       12      6        5         0      0
+synthfx        12      8        6         0      0
+ethnic         12      8        5         0      0
+percussive     13      8        6         0      0
+soundfx        15      15       7         0      0
+drums          15      10       7         -1     0

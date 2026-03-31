@@ -69,6 +69,7 @@ rcsid[] = "$Id: m_misc.c,v 1.6 1997/02/03 22:45:10 b1 Exp $";
 //
 extern patch_t*         hu_font[HU_FONTSIZE];
 
+
 int
 M_DrawText
 ( int           x,
