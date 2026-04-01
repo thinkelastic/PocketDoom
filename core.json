@@ -9,8 +9,8 @@
             "description": "Doom on VexRiscv RISC-V CPU",
             "author": "ThinkElastic",
             "url": "",
-            "version": "v1.1.5",
-            "date_release": "2026-03-27"
+            "version": "1.2.0",
+            "date_release": "2026-04-01"
         },
         "framework": {
             "target_product": "Analogue Pocket",
