@@ -729,6 +729,7 @@ wire        audio_fifo_full;
 
 // VRR: firmware-written V_TOTAL
 wire [9:0] vrr_v_total;
+wire       psram_burst_enable;
 // CDC vrr_v_total (clk_cpu) → clk_core_12288 (video timing)
 reg [9:0] vrr_vt_sync1, vrr_vt_sync2;
 always @(posedge clk_core_12288) begin
@@ -1903,6 +1904,7 @@ assign video_hs = vidout_hs;
         .run_mode(run_mode_sync2),
         .refresh_rate(refresh_rate_cpu_sync2),
         .vrr_v_total(vrr_v_total),
+        .psram_burst_enable(psram_burst_enable),
         .shutdown_pending(shutdown_pending_cpu),
         .shutdown_ack(shutdown_ack_cpu)
     );

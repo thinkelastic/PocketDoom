@@ -122,6 +122,9 @@ module axi_periph_slave (
     // VRR: firmware-written V_TOTAL (for dynamic refresh rate)
     output reg  [9:0]  vrr_v_total,
 
+    // PSRAM burst mode enable (firmware-controlled, auto-clears on shutdown)
+    output reg         psram_burst_enable,
+
     // Shutdown handshake
     input wire         shutdown_pending,
     output reg         shutdown_ack
@@ -299,9 +302,14 @@ always @(posedge clk) begin
         target_buffer_resp_struct <= 0;
         shutdown_ack <= 0;
         vrr_v_total <= 10'd0;
+        psram_burst_enable <= 0;
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
+
+        // Auto-disable PSRAM burst mode on shutdown (safe for bridge save flush)
+        if (shutdown_pending)
+            psram_burst_enable <= 1'b0;
 
         if (target_ack_s) begin
             target_dataslot_read <= 0;
@@ -342,6 +350,7 @@ always @(posedge clk) begin
                 end
                 6'b011011: shutdown_ack <= req_wdata[0];
                 6'b011111: vrr_v_total <= req_wdata[9:0];
+                6'b100000: psram_burst_enable <= req_wdata[0];  // 0x80
                 6'b010000: pal_index_reg <= req_wdata[7:0];
                 6'b010001: begin
                     pal_wr <= 1;
@@ -394,6 +403,7 @@ always @(*) begin
         6'b011101: sysreg_rdata = run_mode;
         6'b011110: sysreg_rdata = refresh_rate;
         6'b011111: sysreg_rdata = {22'b0, vrr_v_total};
+        6'b100000: sysreg_rdata = {31'b0, psram_burst_enable};
         default: sysreg_rdata = 32'h0;
     endcase
 end
