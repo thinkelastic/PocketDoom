@@ -4,7 +4,7 @@
 //   - BRAM (64KB, burst reads for I-cache line fills)
 //   - System registers (cycle counter, display, palette, dataslot, controllers)
 //   - Terminal forwarding
-//   - Audio/Link/OPL2 register dispatch
+//   - Audio/Link/OPL3 register dispatch
 //
 // AXI4 slave (NOT AXI4-Lite) — iBus issues burst reads to BRAM for I-cache fills.
 //
@@ -101,7 +101,7 @@ module axi_periph_slave (
     output reg  [31:0] adma_reg_wdata,
     input wire  [31:0] adma_reg_rdata,
 
-    // OPL2 hardware interface
+    // OPL3 hardware interface
     output reg         opl_write_req,
     output reg  [1:0]  opl_write_addr,
     output reg  [7:0]  opl_write_data,
@@ -122,8 +122,9 @@ module axi_periph_slave (
     // VRR: firmware-written V_TOTAL (for dynamic refresh rate)
     output reg  [9:0]  vrr_v_total,
 
-    // Bridge CRAM1 write drop counter (read-only, for save load diagnostics)
-    input wire  [15:0] cram1_wr_drops,
+    // SDRAM bridge write drop counter (read/clear for retry logic)
+    input wire  [15:0] sdram_wr_drops,
+    output reg         sdram_wr_drop_clear,
 
     // Shutdown handshake
     input wire         shutdown_pending,
@@ -302,9 +303,11 @@ always @(posedge clk) begin
         target_buffer_resp_struct <= 0;
         shutdown_ack <= 0;
         vrr_v_total <= 10'd0;
+        sdram_wr_drop_clear <= 0;
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
+        sdram_wr_drop_clear <= 0;  // single-cycle pulse
 
 
         if (target_ack_s) begin
@@ -346,6 +349,7 @@ always @(posedge clk) begin
                 end
                 6'b011011: shutdown_ack <= req_wdata[0];
                 6'b011111: vrr_v_total <= req_wdata[9:0];
+                6'b100000: sdram_wr_drop_clear <= req_wdata[0];  // 0x80: write 1 to clear
                 6'b010000: pal_index_reg <= req_wdata[7:0];
                 6'b010001: begin
                     pal_wr <= 1;
@@ -398,7 +402,7 @@ always @(*) begin
         6'b011101: sysreg_rdata = run_mode;
         6'b011110: sysreg_rdata = refresh_rate;
         6'b011111: sysreg_rdata = {22'b0, vrr_v_total};
-        6'b100000: sysreg_rdata = {16'b0, cram1_wr_drops};  // 0x80
+        6'b100000: sysreg_rdata = {16'b0, sdram_wr_drops};  // 0x80
         default: sysreg_rdata = 32'h0;
     endcase
 end
@@ -494,7 +498,7 @@ wire aw_dec_opl    = (aw_addr[31:24] == 8'h4E);
 wire aw_dec_adma   = (aw_addr[31:24] == 8'h4F);
 
 // ============================================
-// OPL2 write request tracking
+// OPL3 write request tracking
 // ============================================
 reg opl_req_pending;  // Set when OPL write issued, cleared on opl_ack
 
@@ -623,7 +627,7 @@ always @(posedge clk or posedge reset) begin
                     else if (aw_dec_term)
                         state <= S_TERM;
                     else if (aw_dec_opl && |s_axi_wstrb) begin
-                        // OPL2 write: issue request and wait for ack
+                        // OPL3 write: issue request and wait for ack
                         opl_write_req <= 1;
                         opl_write_addr <= aw_addr[3:2];
                         opl_write_data <= s_axi_wdata[7:0];
@@ -788,11 +792,11 @@ always @(posedge clk or posedge reset) begin
         end
 
         // ============================================
-        // OPL_WAIT: Wait for OPL2 write to complete
+        // OPL_WAIT: Wait for OPL3 write to complete
         // ============================================
         S_OPL_WAIT: begin
             if (!opl_req_pending) begin
-                // OPL2 write completed (opl_ack received)
+                // OPL3 write completed (opl_ack received)
                 burst_count <= burst_count + 1;
                 if (beat_is_last) begin
                     s_axi_bvalid <= 1;

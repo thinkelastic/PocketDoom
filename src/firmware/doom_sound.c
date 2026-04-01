@@ -10,7 +10,7 @@
  *   from SDRAM into the HW upsampler.  An IRQ fires when the DMA is running
  *   low on data so the CPU can mix more.
  *
- * Music is handled by doom_music.c (OPL2 synthesizer).
+ * Music is handled by doom_music.c (OPL3 synthesizer).
  */
 
 #include <stdint.h>

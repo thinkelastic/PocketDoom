@@ -38,6 +38,11 @@
 /* DS_COMMAND values */
 #define DS_CMD_READ         1
 #define DS_CMD_WRITE        2
+
+/* SDRAM bridge write drop counter (detects lost writes during DMA).
+ * Read: returns drop count since last clear.  Write 1: clears count. */
+#define SYS_SDRAM_WR_DROPS  (*(volatile uint32_t*)(SYS_BASE + 0x80))
+#define MAX_DMA_RETRIES     3
 #define DS_CMD_OPENFILE     3
 
 /* DS_STATUS bits */
@@ -63,6 +68,7 @@
  * safely outside the heap region used by the zone allocator. */
 #define DMA_BUFFER       0x10180000          /* Fixed SDRAM address for DMA */
 #define DMA_CHUNK_SIZE   (512 * 1024)        /* Max bytes per DMA transfer */
+
 
 /* Open file parameter structure (256 + 4 + 4 = 264 bytes) */
 typedef struct __attribute__((packed)) {

@@ -3,7 +3,7 @@
  *
  * MUS format parser driving Nuked OPL3 (bit-perfect YMF262 emulator).
  * Reads instrument patches from the WAD's GENMIDI lump.
- * Drives the FPGA OPL2 hardware; audio is mixed in audio_output.v.
+ * Drives the FPGA OPL3 hardware; audio is mixed in audio_output.v.
  */
 
 #include <stdint.h>

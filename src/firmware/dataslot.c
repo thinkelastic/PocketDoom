@@ -120,39 +120,39 @@ int dataslot_read(uint32_t slot_id, uint32_t offset, void *dest, uint32_t length
 
     uint32_t bridge_addr = CPU_TO_BRIDGE_ADDR(dest_addr);
 
-    /* Debug: print parameters */
     DS_LOG("DS: slot=%d off=%x br=%x len=%x\n",
                 slot_id, offset, bridge_addr, length);
 
-    /* Write back dirty D-cache lines before DMA so the bridge doesn't
-     * read stale data if it ever needs to, and so dirty lines at the
-     * dest address become clean (preventing later eviction writeback
-     * from overwriting DMA'd data). */
     __asm__ volatile("fence");
 
-    /* Set up registers */
-    DS_SLOT_ID = slot_id;
-    DS_SLOT_OFFSET = offset;
-    DS_BRIDGE_ADDR = bridge_addr;
-    DS_LENGTH = length;
+    int result;
+    for (int attempt = 0; attempt <= MAX_DMA_RETRIES; attempt++) {
+        /* Clear the SDRAM write drop counter before each attempt */
+        SYS_SDRAM_WR_DROPS = 1;
+        for (volatile int i = 0; i < 16; i++) {}  /* CDC settle */
 
-    /* Trigger read command */
-    DS_COMMAND = DS_CMD_READ;
+        /* Set up registers and trigger */
+        DS_SLOT_ID = slot_id;
+        DS_SLOT_OFFSET = offset;
+        DS_BRIDGE_ADDR = bridge_addr;
+        DS_LENGTH = length;
+        DS_COMMAND = DS_CMD_READ;
 
-    /* Wait for completion */
-    int result = dataslot_wait_complete();
+        result = dataslot_wait_complete();
+        if (result < 0)
+            return result;
 
-    /* The bridge sets DONE when it finishes sending data, but the last
-     * few bridge writes may still be in the CDC pipeline (4-stage sync
-     * from clk_74a to clk_ram + SDRAM write latency ≈ 15-20 cycles).
-     * Spin-wait to ensure all writes have landed in SDRAM before the
-     * caller reads the data. */
-    for (volatile int i = 0; i < 32; i++) {}
+        /* Wait for bridge write pipeline to settle (skid → dcfifo → SDRAM) */
+        for (volatile int i = 0; i < 32; i++) {}
 
-    /* NOTE: After DMA, the D-cache may still hold stale data for dest.
-     * Callers MUST read DMA'd data through the uncacheable SDRAM alias:
-     *   SDRAM_UNCACHED(dest)  (0x50000000 + offset, same physical SDRAM)
-     * This bypasses the D-cache entirely, reading fresh data from SDRAM. */
+        /* Check if any bridge writes were dropped during the transfer */
+        uint32_t drops = SYS_SDRAM_WR_DROPS & 0xFFFF;
+        if (drops == 0)
+            break;  /* Clean transfer — no retry needed */
+
+        /* Drops detected — retry (data may be corrupted) */
+        DS_LOG("DS: %d drops on attempt %d, retrying\n", drops, attempt);
+    }
 
     return result;
 }

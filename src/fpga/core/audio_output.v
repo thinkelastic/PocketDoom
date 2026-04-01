@@ -18,7 +18,7 @@ module audio_output (
     output wire [11:0] fifo_level,    // Write-side fill level
     output wire        fifo_full,
 
-    // OPL2 hardware audio input (from opl2_wrapper, clk_sys domain)
+    // OPL3 hardware audio input (from opl3_wrapper, clk_sys domain)
     input  wire signed [15:0] opl_audio_in,
     input  wire               opl_toggle_in,   // toggles on each new OPL sample
 

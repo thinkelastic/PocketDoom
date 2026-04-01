@@ -1,7 +1,7 @@
 //
 // User core top-level (PocketDoom)
 //
-// VexiiRiscv CPU with AXI4 bus architecture, OPL2 sound synthesis.
+// VexiiRiscv CPU with AXI4 bus architecture, OPL3 sound synthesis.
 // Instantiated by the real top-level: apf_top
 //
 
@@ -730,6 +730,7 @@ wire        audio_fifo_full;
 
 // VRR: firmware-written V_TOTAL
 wire [9:0] vrr_v_total;
+wire       sdram_wr_drop_clear;
 // CDC vrr_v_total (clk_cpu) → clk_core_12288 (video timing)
 reg [9:0] vrr_vt_sync1, vrr_vt_sync2;
 always @(posedge clk_core_12288) begin
@@ -737,7 +738,7 @@ always @(posedge clk_core_12288) begin
     vrr_vt_sync2 <= vrr_vt_sync1;
 end
 
-// OPL2 hardware interface
+// OPL3 hardware interface
 wire        opl_write_req;
 wire [1:0]  opl_write_addr;
 wire [7:0]  opl_write_data;
@@ -964,6 +965,16 @@ always @(posedge clk_74a) begin
             bridge_wr_skid_wrptr <= bridge_wr_skid_wrptr + 2'd1;
         end
 
+        // Drop detection: count writes that were rejected (skid full, FIFO full)
+        if (bridge_wr_skid_push && !bridge_wr_skid_push_ok) begin
+            if (sdram_wr_drop_count != 16'hFFFF)
+                sdram_wr_drop_count <= sdram_wr_drop_count + 16'd1;
+        end
+
+        // Firmware clear: synchronized from clk_cpu
+        if (sdram_wr_drop_clear_sync[2])
+            sdram_wr_drop_count <= 16'd0;
+
         case ({bridge_wr_skid_push_ok, bridge_wr_skid_pop})
             2'b10: bridge_wr_skid_count <= bridge_wr_skid_count + 3'd1;
             2'b01: bridge_wr_skid_count <= bridge_wr_skid_count - 3'd1;
@@ -971,6 +982,22 @@ always @(posedge clk_74a) begin
         endcase
     end
 end
+
+// SDRAM drop counter (clk_74a) + CDC to/from clk_cpu
+reg [15:0] sdram_wr_drop_count;
+
+// CDC: counter (clk_74a → clk_cpu) for firmware readout
+reg [15:0] sdram_wr_drop_sync1, sdram_wr_drop_sync2;
+always @(posedge clk_cpu) begin
+    sdram_wr_drop_sync1 <= sdram_wr_drop_count;
+    sdram_wr_drop_sync2 <= sdram_wr_drop_sync1;
+end
+wire [15:0] sdram_wr_drops = sdram_wr_drop_sync2;
+
+// CDC: clear pulse (clk_cpu → clk_74a) for firmware reset
+reg [2:0] sdram_wr_drop_clear_sync;
+always @(posedge clk_74a)
+    sdram_wr_drop_clear_sync <= {sdram_wr_drop_clear_sync[1:0], sdram_wr_drop_clear};
 
 dcfifo bridge_wr_fifo (
     .wrclk   (clk_74a),
@@ -1082,9 +1109,9 @@ reg bridge_rd_done;
 reg bridge_rd_done_sync1, bridge_rd_done_sync2;
 reg [31:0] bridge_rd_data_captured;
 
-// CRAM1 read: request FIFO (clk_74a→ram_controller) + register response
-// The drain FSM reads PSRAM and writes bridge_rd_data_captured directly.
-// The APF host is slow enough (~1.6µs per word over SPI) that the drain FSM
+// CRAM1 read: direct (both on clk_74a since PSRAM1 reclock).
+// The bridge read FSM reads PSRAM1 directly and latches the response.
+// The APF host is slow enough (~1.6µs per word over SPI) that the read FSM
 // always completes before the next bridge_rd.
 always @(posedge clk_74a) begin
     bridge_rd_done_sync1 <= bridge_rd_done;
@@ -1158,7 +1185,7 @@ always @(posedge clk_ram_controller) begin
         bridge_rd_done <= 0;
     end
 
-    // (CRAM1 reads now use response FIFO — see below)
+    // (CRAM1 reads are now direct on clk_74a — see below)
 end
 
 // Bridge CRAM0 write active signal (single-word handshake)
@@ -1757,7 +1784,7 @@ assign video_hs = vidout_hs;
         .link_reg_addr(link_reg_addr),
         .link_reg_wdata(link_reg_wdata),
         .link_reg_rdata(link_reg_rdata),
-        // OPL2 hardware interface
+        // OPL3 hardware interface
         .opl_write_req(opl_write_req),
         .opl_write_addr(opl_write_addr),
         .opl_write_data(opl_write_data),
@@ -1767,7 +1794,8 @@ assign video_hs = vidout_hs;
         .run_mode(run_mode_sync2),
         .refresh_rate(refresh_rate_cpu_sync2),
         .vrr_v_total(vrr_v_total),
-        .cram1_wr_drops(cram1_wr_drops),
+        .sdram_wr_drops(sdram_wr_drops),
+        .sdram_wr_drop_clear(sdram_wr_drop_clear),
         .shutdown_pending(shutdown_pending_cpu),
         .shutdown_ack(shutdown_ack_cpu)
     );
@@ -2250,7 +2278,7 @@ audio_upsample audio_up (
 );
 
 //
-// Audio output (dcfifo + I2S) with OPL2 mixing
+// Audio output (dcfifo + I2S) with OPL3 mixing
 //
 audio_output audio_out (
     .clk_sys      (clk_cpu),
