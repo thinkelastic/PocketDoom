@@ -52,16 +52,6 @@
                 "deferload": true
             },
             {
-                "id": 4,
-                "name": "OPL3 Tuning",
-                "required": false,
-                "parameters": 0,
-                "extensions": [
-                    "opl"
-                ],
-                "deferload": true
-            },
-            {
                 "id": 5,
                 "name": "Saves",
                 "required": false,

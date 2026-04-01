@@ -27,6 +27,14 @@
             {
                 "id": 3,
                 "filename": "default.cfg"
+            },
+            {
+                "id": 5,
+                "filename": "tnt/TNT.sav"
+            },
+            {
+                "id": 6,
+                "filename": "tnt/TNT.cfg"
             }
         ]
     }

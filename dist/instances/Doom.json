@@ -23,6 +23,14 @@
             {
                 "id": 3,
                 "filename": "default.cfg"
+            },
+            {
+                "id": 5,
+                "filename": "doom/Doom.sav"
+            },
+            {
+                "id": 6,
+                "filename": "doom/Doom.cfg"
             }
         ]
     }

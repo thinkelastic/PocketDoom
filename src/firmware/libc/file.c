@@ -493,7 +493,9 @@ static uint32_t sav_read_from_slot(int slot_idx) {
         return uncomp_size;
     }
 
-    /* v1 format (backward compat, no padding): [game_id][size][data] */
+    /* v1 format (backward compat, no padding): [game_id][size][data]
+     * Apply strict validation to avoid treating uninitialized PSRAM
+     * (garbage after a short bridge load) as a valid save. */
     volatile uint8_t *raw = sav_slot_raw(slot_idx);
     volatile uint32_t *hdr = (volatile uint32_t *)raw;
     uint32_t game_id    = hdr[0];
@@ -502,6 +504,14 @@ static uint32_t sav_read_from_slot(int slot_idx) {
     if (my_id != 0 && game_id != my_id)
         return 0;
     if (saved_size == 0 || saved_size == 0xFFFFFFFF || saved_size > SAV_V1_MAX_DATA)
+        return 0;
+    /* v1 game_id must be a known manual ID (1-5) — reject garbage values.
+     * Derived IDs (bit 31 set) only exist in v2 format. */
+    if (game_id == 0 || game_id > 5)
+        return 0;
+    /* Doom saves start with a version string like " E1M1" or " MAP01".
+     * The first data byte (after header) must be 0x20 (space). */
+    if (raw[SAV_V1_HEADER_SIZE] != 0x20)
         return 0;
 
     memset(sav_buf, 0, SAV_BUF_SIZE);

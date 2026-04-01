@@ -23,6 +23,14 @@
             {
                 "id": 3,
                 "filename": "default.cfg"
+            },
+            {
+                "id": 5,
+                "filename": "doomu/UltimateDoom.sav"
+            },
+            {
+                "id": 6,
+                "filename": "doomu/UltimateDoom.cfg"
             }
         ]
     }
