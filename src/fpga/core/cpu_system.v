@@ -89,7 +89,10 @@ module cpu_system (
     output reg         m_local_wlast,
 
     input  wire        m_local_bvalid,
-    input  wire [1:0]  m_local_bresp
+    input  wire [1:0]  m_local_bresp,
+
+    // External interrupt (active high)
+    input  wire        int_m_external
 );
 
 // ============================================
@@ -175,7 +178,7 @@ VexiiRiscv cpu (
     .PrivilegedPlugin_logic_rdtime(rdtime_counter),
     .PrivilegedPlugin_logic_harts_0_int_m_timer(1'b0),
     .PrivilegedPlugin_logic_harts_0_int_m_software(1'b0),
-    .PrivilegedPlugin_logic_harts_0_int_m_external(1'b0),
+    .PrivilegedPlugin_logic_harts_0_int_m_external(int_m_external),
 
     // LsuL1Axi4 (D-cache)
     .LsuL1Axi4Plugin_logic_axi_aw_valid(lsu_aw_valid),

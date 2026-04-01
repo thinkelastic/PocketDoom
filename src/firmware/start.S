@@ -1,22 +1,34 @@
 /*
  * VexRiscv startup code
  * Sets up stack pointer and jumps to main
- * Includes trap handler for misaligned access emulation and crash debugging
+ * Includes trap/interrupt handler for misaligned access emulation,
+ * external interrupts (audio DMA), and crash debugging.
+ *
+ * mtvec points to _start (address 0), shared between cold boot and traps.
+ * On entry, t0 is saved to mscratch, then mcause distinguishes boot vs trap.
+ * The interrupted sp is preserved correctly (unlike the original code).
  */
 
 .section .text.start
 .global _start
 
 _start:
-    /* Cold boot: set up stack pointer */
-    lui sp, %hi(_stack_top)
-    addi sp, sp, %lo(_stack_top)
+    /* Save t0 to mscratch so we have a scratch register.
+     * On cold boot: t0 is undefined, doesn't matter.
+     * On trap: t0 is from the interrupted context, must be preserved. */
+    csrw mscratch, t0
 
-    /* Check if this is a trap (exception re-entry) or cold boot.
-     * On cold boot, mcause is 0. On exception, mcause is non-zero.
-     * VexRiscv jumps to mtvec (address 0) on any exception. */
+    /* Check mcause: 0 = cold boot, non-zero = trap/interrupt */
     csrr t0, mcause
     bnez t0, _trap_entry
+
+    /* ========================================
+     * Cold boot (mcause = 0)
+     * ======================================== */
+
+    /* Set up BRAM stack */
+    lui sp, %hi(_stack_top)
+    addi sp, sp, %lo(_stack_top)
 
     /* Enable FPU: set mstatus.FS = 11 (Dirty) — bits [14:13] */
     li t0, (3 << 13)
@@ -52,7 +64,14 @@ halt:
 
 
 /* ========================================
- * Trap entry - saves all integer + float registers and dispatches
+ * Trap/interrupt entry
+ *
+ * At this point:
+ *   mscratch = original t0 (saved at _start entry)
+ *   t0       = mcause (clobbered — will be re-read from CSR)
+ *   sp       = interrupted sp (NOT clobbered — _start didn't touch it)
+ *   All other registers are from the interrupted context
+ *
  * Trap frame layout:
  *   x0-x31  (32 words) at sp+0   .. sp+124
  *   mepc    (1 word)   at sp+128
@@ -62,25 +81,30 @@ halt:
  * Total: 67 words = 268 bytes (round to 272 for 8-byte alignment)
  * ======================================== */
 _trap_entry:
-    /* We need a safe stack. Use top of BRAM scratch area temporarily.
-     * Save current sp first so we can include it in the frame. */
-    csrw mscratch, sp
+    /* t0 is free (has mcause, will re-read later).
+     * Use t0 to save the interrupted sp, then switch to trap stack. */
+    mv t0, sp
 
-    /* Switch to trap stack in BRAM */
+    /* Switch to BRAM trap stack */
     lui sp, %hi(_stack_top)
     addi sp, sp, %lo(_stack_top)
 
     /* Allocate trap frame: 272 bytes */
     addi sp, sp, -272
 
-    /* Save x1-x31 (skip x0 which is always 0) */
-    sw x1,   4(sp)
-    /* x2 (sp) - save the original sp from mscratch */
-    csrr t0, mscratch
+    /* Save interrupted sp (was in t0) */
     sw t0,   8(sp)
+
+    /* Save original t0 from mscratch */
+    csrr t0, mscratch
+    sw t0,  20(sp)
+
+    /* Save remaining integer registers */
+    sw x1,   4(sp)
+    /* x2 (sp) already saved above at offset 8 */
     sw x3,  12(sp)
     sw x4,  16(sp)
-    sw x5,  20(sp)
+    /* x5 (t0) already saved above at offset 20 */
     sw x6,  24(sp)
     sw x7,  28(sp)
     sw x8,  32(sp)
@@ -108,13 +132,15 @@ _trap_entry:
     sw x30, 120(sp)
     sw x31, 124(sp)
 
-    /* Save CSRs: mepc, mcause, mtval */
+    /* Save CSRs: mepc, mcause, mtval, mstatus */
     csrr t0, mepc
     sw t0, 128(sp)
     csrr t0, mcause
     sw t0, 132(sp)
     csrr t0, mtval
     sw t0, 136(sp)
+    csrr t0, mstatus
+    sw t0, 268(sp)
 
     /* Store 0 at x0 position (for completeness) */
     sw zero, 0(sp)
@@ -199,9 +225,10 @@ _trap_entry:
     flw f30, 260(sp)
     flw f31, 264(sp)
 
-    /* Restore integer registers */
+    /* Restore integer registers.
+     * Load interrupted sp into mscratch for final restore. */
     lw x1,   4(sp)
-    /* Restore original sp to mscratch temporarily */
+    /* x2 (sp) restored last via mscratch */
     lw t0,   8(sp)
     csrw mscratch, t0
     lw x3,  12(sp)
@@ -234,7 +261,14 @@ _trap_entry:
     lw x30, 120(sp)
     lw x31, 124(sp)
 
-    /* Restore original sp from mscratch */
+    /* Restore mstatus (preserves MIE/MPIE across nested traps) */
+    lw t0, 268(sp)
+    csrw mstatus, t0
+
+    /* Restore t0 again (we just clobbered it) */
+    lw t0, 20(sp)
+
+    /* Restore interrupted sp from mscratch */
     csrr sp, mscratch
 
     /* Return from trap */

@@ -95,6 +95,12 @@ module axi_periph_slave (
     output reg  [31:0] link_reg_wdata,
     input wire  [31:0] link_reg_rdata,
 
+    // Audio DMA register interface
+    output reg         adma_reg_wr,
+    output reg  [4:0]  adma_reg_addr,
+    output reg  [31:0] adma_reg_wdata,
+    input wire  [31:0] adma_reg_rdata,
+
     // OPL2 hardware interface
     output reg         opl_write_req,
     output reg  [1:0]  opl_write_addr,
@@ -399,6 +405,7 @@ wire        audio_buf_full = (audio_buf_level >= 10'd512);
 wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
                              reg_audio  ? {19'b0, audio_buf_full, 2'b0, audio_buf_level} :
                              reg_link   ? link_reg_rdata :
+                             reg_adma   ? adma_reg_rdata :
                              32'h0;
 
 // ============================================
@@ -430,6 +437,7 @@ reg reg_sysreg;
 reg reg_audio;
 reg reg_link;
 reg reg_opl;
+reg reg_adma;
 
 wire beat_is_last = (burst_count == burst_len);
 
@@ -470,6 +478,7 @@ wire ar_dec_sysreg = (ar_addr[31:8]  == 24'h400000);
 wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
 wire ar_dec_opl    = (ar_addr[31:24] == 8'h4E);
+wire ar_dec_adma   = (ar_addr[31:24] == 8'h4F);
 
 wire aw_dec_ram    = (aw_addr[31:16] == 16'b0);
 wire aw_dec_term   = (aw_addr[31:13] == 19'h10000);
@@ -477,6 +486,7 @@ wire aw_dec_sysreg = (aw_addr[31:8]  == 24'h400000);
 wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
 wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
 wire aw_dec_opl    = (aw_addr[31:24] == 8'h4E);
+wire aw_dec_adma   = (aw_addr[31:24] == 8'h4F);
 
 // ============================================
 // OPL2 write request tracking
@@ -512,6 +522,7 @@ always @(posedge clk or posedge reset) begin
         reg_audio <= 0;
         reg_link <= 0;
         reg_opl <= 0;
+        reg_adma <= 0;
 
         sysreg_wr_fire <= 0;
         audio_sample_wr <= 0;
@@ -520,6 +531,9 @@ always @(posedge clk or posedge reset) begin
         link_reg_rd <= 0;
         link_reg_addr <= 0;
         link_reg_wdata <= 0;
+        adma_reg_wr <= 0;
+        adma_reg_addr <= 0;
+        adma_reg_wdata <= 0;
 
         opl_write_req <= 0;
         opl_write_addr <= 0;
@@ -536,6 +550,7 @@ always @(posedge clk or posedge reset) begin
         audio_sample_wr <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
+        adma_reg_wr <= 0;
 
         // OPL ack clears request
         if (opl_ack) begin
@@ -562,6 +577,7 @@ always @(posedge clk or posedge reset) begin
                 reg_audio  <= ar_dec_audio;
                 reg_link   <= ar_dec_link;
                 reg_opl    <= ar_dec_opl;
+                reg_adma   <= ar_dec_adma;
 
                 if (ar_dec_ram)
                     state <= S_BRAM_RD;
@@ -573,6 +589,8 @@ always @(posedge clk or posedge reset) begin
                         link_reg_addr <= ar_addr[6:2];
                         link_reg_rd <= 1;
                     end
+                    if (ar_dec_adma)
+                        adma_reg_addr <= ar_addr[6:2];
                 end
 
             end else if (s_axi_awvalid) begin
@@ -588,6 +606,7 @@ always @(posedge clk or posedge reset) begin
                 reg_audio  <= aw_dec_audio;
                 reg_link   <= aw_dec_link;
                 reg_opl    <= aw_dec_opl;
+                reg_adma   <= aw_dec_adma;
 
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
@@ -617,6 +636,11 @@ always @(posedge clk or posedge reset) begin
                             link_reg_wr <= 1;
                             link_reg_addr <= aw_addr[6:2];
                             link_reg_wdata <= s_axi_wdata;
+                        end
+                        if (aw_dec_adma && |s_axi_wstrb) begin
+                            adma_reg_wr <= 1;
+                            adma_reg_addr <= aw_addr[6:2];
+                            adma_reg_wdata <= s_axi_wdata;
                         end
                     end
                 end else begin
@@ -748,6 +772,11 @@ always @(posedge clk or posedge reset) begin
                         link_reg_wr <= 1;
                         link_reg_addr <= req_addr[6:2];
                         link_reg_wdata <= s_axi_wdata;
+                    end
+                    if (reg_adma && |s_axi_wstrb) begin
+                        adma_reg_wr <= 1;
+                        adma_reg_addr <= req_addr[6:2];
+                        adma_reg_wdata <= s_axi_wdata;
                     end
                 end
             end

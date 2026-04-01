@@ -1,12 +1,15 @@
 /*
- * Misaligned access trap handler for RISC-V
- * Emulates unaligned loads/stores using byte operations
+ * Trap handler for RISC-V
+ * Handles misaligned access emulation and external interrupts (audio DMA)
  */
 
 #include "terminal.h"
 /* Debug variables (defined in main.c) */
 extern volatile unsigned int pd_dbg_stage;
 extern volatile unsigned int pd_dbg_info;
+
+/* Audio DMA ISR (defined in doom_sound.c) */
+extern void audio_dma_isr(void);
 
 /* Trap frame layout (matches start.S) */
 typedef struct {
@@ -128,6 +131,16 @@ static unsigned int misaligned_count = 0;
 __attribute__((section(".text.boot")))
 int handle_misaligned(trap_frame_t *frame) {
     unsigned int mcause = frame->mcause;
+
+    /* Interrupts: MSB of mcause is set */
+    if (mcause & 0x80000000) {
+        unsigned int code = mcause & 0x7FFFFFFF;
+        if (code == 11) {  /* Machine external interrupt */
+            audio_dma_isr();
+            return 1;
+        }
+        return 0;  /* Unhandled interrupt → fatal */
+    }
 
     /* Only handle misaligned load/store traps */
     if (mcause != CAUSE_LOAD_MISALIGNED && mcause != CAUSE_STORE_MISALIGNED)

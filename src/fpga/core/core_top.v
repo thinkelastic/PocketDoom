@@ -694,10 +694,33 @@ wire [31:0] psram_mux_rdata;
 wire        psram_mux_busy;
 wire        psram_mux_rdata_valid;
 
-// Audio output interface
-wire        audio_sample_wr;
-wire [31:0] audio_sample_data;
+// Audio output interface (from axi_periph_slave — CPU MMIO path)
+wire        audio_cpu_sample_wr;
+wire [31:0] audio_cpu_sample_data;
 wire [9:0]  audio_buf_level;
+
+// Audio DMA interface
+wire        adma_sample_wr;
+wire [31:0] adma_sample_data;
+wire        adma_irq;
+wire        adma_reg_wr;
+wire [4:0]  adma_reg_addr;
+wire [31:0] adma_reg_wdata;
+wire [31:0] adma_reg_rdata;
+
+// Audio DMA AXI4 read master signals
+wire        adma_m_arvalid;
+wire        adma_m_arready;
+wire [31:0] adma_m_araddr;
+wire [7:0]  adma_m_arlen;
+wire        adma_m_rvalid;
+wire [31:0] adma_m_rdata;
+wire        adma_m_rlast;
+
+// Mux: DMA takes priority when active (CPU should not write while DMA is enabled)
+wire        audio_sample_wr   = adma_sample_wr   | audio_cpu_sample_wr;
+wire [31:0] audio_sample_data = adma_sample_wr ? adma_sample_data : audio_cpu_sample_data;
+
 // Upsampler → audio_output FIFO bridge
 wire        audio_up_wr;
 wire [31:0] audio_up_data;
@@ -1788,7 +1811,9 @@ assign video_hs = vidout_hs;
         .m_local_wstrb(cpu_m_local_wstrb),
         .m_local_wlast(cpu_m_local_wlast),
         .m_local_bvalid(cpu_m_local_bvalid),
-        .m_local_bresp(cpu_m_local_bresp)
+        .m_local_bresp(cpu_m_local_bresp),
+        // External interrupt
+        .int_m_external(adma_irq)
     );
 
     // AXI4 peripheral slave
@@ -1853,10 +1878,15 @@ assign video_hs = vidout_hs;
         .target_dataslot_length(cpu_target_dataslot_length),
         .target_buffer_param_struct(cpu_target_buffer_param_struct),
         .target_buffer_resp_struct(cpu_target_buffer_resp_struct),
-        // Audio output interface
-        .audio_sample_wr(audio_sample_wr),
-        .audio_sample_data(audio_sample_data),
+        // Audio output interface (CPU MMIO path)
+        .audio_sample_wr(audio_cpu_sample_wr),
+        .audio_sample_data(audio_cpu_sample_data),
         .audio_buf_level(audio_buf_level),
+        // Audio DMA register interface
+        .adma_reg_wr(adma_reg_wr),
+        .adma_reg_addr(adma_reg_addr),
+        .adma_reg_wdata(adma_reg_wdata),
+        .adma_reg_rdata(adma_reg_rdata),
         // Link MMIO interface
         .link_reg_wr(link_reg_wr),
         .link_reg_rd(link_reg_rd),
@@ -1951,7 +1981,7 @@ assign video_hs = vidout_hs;
         .wr_idle(bridge_m_wr_idle)
     );
 
-    // AXI4 SDRAM arbiter: M0 (tied off) > M1 (tied off) > CPU(M2) > Bridge(M3)
+    // AXI4 SDRAM arbiter: M0 (tied off) > M1 (Audio DMA) > CPU(M2) > Bridge(M3)
     axi_sdram_arbiter sdram_arb (
         .clk(clk_cpu),
         .reset_n(reset_n),
@@ -1966,11 +1996,11 @@ assign video_hs = vidout_hs;
         .m0_wdata(32'b0),   .m0_wstrb(4'b0),
         .m0_wlast(1'b0),
         .m0_bvalid(),       .m0_bresp(),
-        // M1: Tied off (was DMA)
-        .m1_arvalid(1'b0), .m1_arready(),
-        .m1_araddr(32'b0),  .m1_arlen(8'b0),
-        .m1_rvalid(),       .m1_rdata(),
-        .m1_rresp(),        .m1_rlast(),
+        // M1: Audio DMA (read-only from SDRAM)
+        .m1_arvalid(adma_m_arvalid), .m1_arready(adma_m_arready),
+        .m1_araddr(adma_m_araddr),   .m1_arlen(adma_m_arlen),
+        .m1_rvalid(adma_m_rvalid),   .m1_rdata(adma_m_rdata),
+        .m1_rresp(),                 .m1_rlast(adma_m_rlast),
         .m1_awvalid(1'b0), .m1_awready(),
         .m1_awaddr(32'b0),  .m1_awlen(8'b0),
         .m1_wvalid(1'b0),  .m1_wready(),
@@ -2304,6 +2334,37 @@ opl3_wrapper opl3 (
     .opl_ack            (opl_ack),
     .opl_audio_out      (opl_audio_out),
     .opl_sample_toggle  (opl_sample_toggle)
+);
+
+//
+// Audio DMA engine — reads pre-mixed samples from SDRAM, feeds ring buffer
+//
+audio_dma adma (
+    .clk           (clk_cpu),
+    .reset_n       (reset_n),
+
+    // MMIO registers (from axi_periph_slave at 0x4F)
+    .reg_wr        (adma_reg_wr),
+    .reg_addr      (adma_reg_addr),
+    .reg_wdata     (adma_reg_wdata),
+    .reg_rdata     (adma_reg_rdata),
+
+    // AXI4 read master (to SDRAM arbiter M1)
+    .m_axi_arvalid (adma_m_arvalid),
+    .m_axi_arready (adma_m_arready),
+    .m_axi_araddr  (adma_m_araddr),
+    .m_axi_arlen   (adma_m_arlen),
+    .m_axi_rvalid  (adma_m_rvalid),
+    .m_axi_rdata   (adma_m_rdata),
+    .m_axi_rlast   (adma_m_rlast),
+
+    // Ring buffer write + level
+    .sample_wr     (adma_sample_wr),
+    .sample_data   (adma_sample_data),
+    .buf_level     (audio_buf_level),
+
+    // Interrupt
+    .irq           (adma_irq)
 );
 
 //
