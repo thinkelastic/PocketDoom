@@ -725,7 +725,7 @@ wire [31:0] audio_sample_data = adma_sample_wr ? adma_sample_data : audio_cpu_sa
 // Upsampler → audio_output FIFO bridge
 wire        audio_up_wr;
 wire [31:0] audio_up_data;
-wire [11:0] audio_fifo_level;
+wire [6:0]  audio_fifo_level;
 wire        audio_fifo_full;
 
 // VRR: firmware-written V_TOTAL
