@@ -15,7 +15,7 @@ module audio_output (
     // CPU write interface (SFX samples)
     input  wire        sample_wr,     // Write strobe (one clk_sys cycle)
     input  wire [31:0] sample_data,   // {left[15:0], right[15:0]}
-    output wire [6:0]  fifo_level,    // Write-side fill level
+    output wire [8:0]  fifo_level,    // Write-side fill level
     output wire        fifo_full,
 
     // OPL3 hardware audio input (from opl3_wrapper, clk_sys domain)
@@ -57,11 +57,11 @@ dcfifo dcfifo_audio (
     .aclr    (~reset_n)
 );
 defparam dcfifo_audio.intended_device_family = "Cyclone V",
-    dcfifo_audio.lpm_numwords  = 128,
+    dcfifo_audio.lpm_numwords  = 512,
     dcfifo_audio.lpm_showahead = "OFF",
     dcfifo_audio.lpm_type      = "dcfifo",
     dcfifo_audio.lpm_width     = 32,
-    dcfifo_audio.lpm_widthu    = 7,
+    dcfifo_audio.lpm_widthu    = 9,
     dcfifo_audio.overflow_checking  = "ON",
     dcfifo_audio.underflow_checking = "ON",
     dcfifo_audio.rdsync_delaypipe   = 5,
@@ -112,10 +112,10 @@ always @(posedge clk_audio) begin
             hold_l <= $signed(fifo_l);
             hold_r <= $signed(fifo_r);
         end else begin
-            // Ramp toward zero: arithmetic right shift by 6 (~64 sample fade)
-            // Keeps sign, converges to 0 for both positive and negative values
-            hold_l <= hold_l - (hold_l >>> 6);
-            hold_r <= hold_r - (hold_r >>> 6);
+            // Ramp toward zero: gentle decay (>>>8 ≈ 0.4% per sample)
+            // to minimise slope discontinuity at the transition edge
+            hold_l <= hold_l - (hold_l >>> 8);
+            hold_r <= hold_r - (hold_r >>> 8);
         end
     end
 end
@@ -123,38 +123,55 @@ end
 wire signed [15:0] sfx_l = fifo_empty ? hold_l : $signed(fifo_l);
 wire signed [15:0] sfx_r = fifo_empty ? hold_r : $signed(fifo_r);
 
-// CDC: toggle-handshake for 16-bit OPL audio (clk_sys → clk_audio).
-// A simple double-register on a multi-bit bus can glitch when routing
-// skew causes different bits to be captured from different samples.
-// Instead, sync only the 1-bit toggle; when an edge is detected the
-// 16-bit data has been stable for 2+ clk_audio periods (~163 ns >>
-// any intra-FPGA routing skew) so it can be safely latched.
-reg        opl_tog_s1, opl_tog_s2, opl_tog_s3;
-reg signed [15:0] opl_latched;
+// OPL3 synchronous FIFO (same clk_audio domain — no CDC needed).
+// OPL3 produces at ~49.7 kHz, I2S consumes at 48 kHz.
+// FIFO absorbs the rate difference and smooths register-write bursts.
+// When full: drop incoming sample. When empty: hold last value.
+// 5-bit pointers for 16-entry FIFO: MSB distinguishes full from empty.
+reg signed [15:0] opl_fifo [0:15];
+reg [4:0] opl_fifo_wr = 5'd0;
+reg [4:0] opl_fifo_rd = 5'd0;
+wire       opl_fifo_empty = (opl_fifo_wr == opl_fifo_rd);
+wire       opl_fifo_full  = (opl_fifo_wr[3:0] == opl_fifo_rd[3:0]) &&
+                             (opl_fifo_wr[4]   != opl_fifo_rd[4]);
+
+// Detect new OPL3 sample via toggle edge (same clock domain, single FF)
+reg opl_tog_prev;
 always @(posedge clk_audio) begin
-    opl_tog_s1 <= opl_toggle_in;
-    opl_tog_s2 <= opl_tog_s1;
-    opl_tog_s3 <= opl_tog_s2;
-    if (opl_tog_s2 != opl_tog_s3)
-        opl_latched <= opl_audio_in;   // data stable — safe to latch
+    opl_tog_prev <= opl_toggle_in;
+    if (opl_toggle_in != opl_tog_prev && !opl_fifo_full) begin
+        opl_fifo[opl_fifo_wr[3:0]] <= opl_audio_in;
+        opl_fifo_wr <= opl_fifo_wr + 5'd1;
+    end
 end
 
-// Mix SFX + OPL into both L and R channels, then 1.5x boost (×3 >>> 1).
-wire signed [15:0] opl_scaled = opl_latched;
-wire signed [16:0] mix_l = {sfx_l[15], sfx_l} + {opl_scaled[15], opl_scaled};
-wire signed [16:0] mix_r = {sfx_r[15], sfx_r} + {opl_scaled[15], opl_scaled};
+// Read from FIFO on audio_pop, hold last value if empty
+reg signed [15:0] opl_current = 16'sd0;
+always @(posedge clk_audio) begin
+    if (audio_pop && !opl_fifo_empty) begin
+        opl_current <= opl_fifo[opl_fifo_rd[3:0]];
+        opl_fifo_rd <= opl_fifo_rd + 5'd1;
+    end
+end
 
-// 3x boost
-wire signed [18:0] boost_l = {{2{mix_l[16]}}, mix_l} + {mix_l[16], mix_l, 1'b0};
-wire signed [18:0] boost_r = {{2{mix_r[16]}}, mix_r} + {mix_r[16], mix_r, 1'b0};
+// SFX at 1x, OPL at 1.5x (x + x/2), hard clamp on sum.
+// SFX per-channel volume reduced in firmware LUT (160 vs 256) to
+// prevent clipping with multiple simultaneous channels.
+wire signed [16:0] opl_15x = {opl_current[15], opl_current}
+                            + {{2{opl_current[15]}}, opl_current[15:1]};
+wire signed [16:0] mix_l = {sfx_l[15], sfx_l} + opl_15x;
+wire signed [16:0] mix_r = {sfx_r[15], sfx_r} + opl_15x;
 
-// Clamp to 16-bit signed
-wire [15:0] mix_clamp_l = (boost_l > 19'sd32767)  ? 16'h7FFF :
-                           (boost_l < -19'sd32768) ? 16'h8000 :
-                           boost_l[15:0];
-wire [15:0] mix_clamp_r = (boost_r > 19'sd32767)  ? 16'h7FFF :
-                           (boost_r < -19'sd32768) ? 16'h8000 :
-                           boost_r[15:0];
+// 1.5x post-mix boost (x + x/2) to raise overall volume.
+// Balance is preserved — both SFX and music scale equally.
+wire signed [17:0] out_l = {mix_l[16], mix_l} + {{2{mix_l[16]}}, mix_l[16:1]};
+wire signed [17:0] out_r = {mix_r[16], mix_r} + {{2{mix_r[16]}}, mix_r[16:1]};
+wire [15:0] mix_clamp_l = (out_l > 18'sd32767)  ? 16'h7FFF :
+                           (out_l < -18'sd32768) ? 16'h8000 :
+                           out_l[15:0];
+wire [15:0] mix_clamp_r = (out_r > 18'sd32767)  ? 16'h7FFF :
+                           (out_r < -18'sd32768) ? 16'h8000 :
+                           out_r[15:0];
 
 // ============================================
 // IIR low-pass filter + DC blocker + audio mix
@@ -189,8 +206,7 @@ audio_filters #(.CLK_RATE(12288000)) audio_filt (
     .audio_r   (filt_out_r)
 );
 
-// Latch filtered output on audio_pop (48 kHz) so the I2S serializer
-// always reads a stable value — eliminates race with FIFO read timing.
+// Latch mixer output on audio_pop (48 kHz) for stable I2S serialization.
 reg [15:0] active_l = 16'h0;
 reg [15:0] active_r = 16'h0;
 always @(posedge clk_audio) begin

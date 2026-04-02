@@ -362,13 +362,8 @@ extern gamestate_t gamestate;
 
 void I_StartFrame(void)
 {
-    /* Use the vsync dead time for OPL music register writes.
-     * OPL_AdvanceMusic() parses MUS events and does bus-stalling
-     * OPL MMIO writes (~27us each, up to ~4ms on dense beats).
-     * Running this here keeps those stalls off the rendering
-     * critical path — they overlap with the vsync wait instead
-     * of adding to frame time after I_FinishUpdate. */
-    OPL_AdvanceMusic();
+    /* OPL music is now advanced from the audio DMA ISR for
+     * consistent timing independent of frame rendering. */
 
     /* Wait for any pending framebuffer swap to complete before the
      * game loop draws the next frame.  This ensures the CPU never
@@ -484,9 +479,7 @@ void I_StartFrame(void)
         }
     }
 
-    /* Top up the audio ring buffer at the start of each frame too,
-     * so it doesn't drain during heavy rendering.  The deficit check
-     * inside I_UpdateSound self-regulates — no double-mixing risk. */
+    /* Top up the audio ring buffer at the start of each frame. */
     I_UpdateSound();
 }
 

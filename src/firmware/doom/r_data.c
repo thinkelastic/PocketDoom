@@ -669,8 +669,34 @@ void R_InitSpriteLumps (void)
     int         i;
     patch_t     *patch;
 
-    firstspritelump = W_GetNumForName ("S_START") + 1;
-    lastspritelump = W_GetNumForName ("S_END") - 1;
+    // Scan forward for the first S_START / SS_START marker (IWAD's).
+    // Scan backward for the last S_END / SS_END marker (PWAD's, if present).
+    // This ensures the sprite range covers both IWAD and PWAD sprites.
+    firstspritelump = -1;
+    for (i = 0; i < numlumps; i++)
+    {
+        if (!strncasecmp(lumpinfo[i].name, "S_START", 8) ||
+            !strncasecmp(lumpinfo[i].name, "SS_START", 8))
+        {
+            firstspritelump = i + 1;
+            break;
+        }
+    }
+    if (firstspritelump == -1)
+        I_Error("R_InitSpriteLumps: S_START not found");
+
+    lastspritelump = -1;
+    for (i = numlumps - 1; i >= 0; i--)
+    {
+        if (!strncasecmp(lumpinfo[i].name, "S_END", 8) ||
+            !strncasecmp(lumpinfo[i].name, "SS_END", 8))
+        {
+            lastspritelump = i - 1;
+            break;
+        }
+    }
+    if (lastspritelump == -1)
+        I_Error("R_InitSpriteLumps: S_END not found");
 
     numspritelumps = lastspritelump - firstspritelump + 1;
     spritewidth = Z_Malloc (numspritelumps*4, PU_STATIC, 0);
@@ -681,6 +707,16 @@ void R_InitSpriteLumps (void)
     {
         if (!(i&63))
             printf (".");
+
+        // Skip marker lumps (S_START, S_END, SS_START, SS_END) and
+        // zero-length lumps that may appear inside the expanded range
+        if (lumpinfo[firstspritelump+i].size == 0)
+        {
+            spritewidth[i] = 0;
+            spriteoffset[i] = 0;
+            spritetopoffset[i] = 0;
+            continue;
+        }
 
         patch = W_CacheLumpNum (firstspritelump+i, PU_CACHE);
         spritewidth[i] = SHORT(patch->width)<<FRACBITS;

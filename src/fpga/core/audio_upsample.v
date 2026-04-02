@@ -140,11 +140,13 @@ always @(posedge clk or negedge reset_n) begin
                     rd_addr <= rd_ptr[8:0];
                     state   <= S_FETCH_A;
                 end else if (!out_full) begin
-                    // Underrun: ramp held value toward zero, push to FIFO
-                    hold_l <= hold_l - (hold_l >>> 6);
-                    hold_r <= hold_r - (hold_r >>> 6);
+                    // Underrun: fade held value toward zero.
+                    // Use gentle decay (>>>8 ≈ 0.4%) to avoid slope
+                    // discontinuity at the transition from live audio.
+                    hold_l <= hold_l - (hold_l >>> 8);
+                    hold_r <= hold_r - (hold_r >>> 8);
                     out_wr   <= 1'b1;
-                    out_data <= {hold_l - (hold_l >>> 6), hold_r - (hold_r >>> 6)};
+                    out_data <= {hold_l - (hold_l >>> 8), hold_r - (hold_r >>> 8)};
                 end
             end
         end

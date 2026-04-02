@@ -9,7 +9,7 @@
             "description": "Doom on VexRiscv RISC-V CPU",
             "author": "ThinkElastic",
             "url": "",
-            "version": "1.2.0",
+            "version": "1.2.1",
             "date_release": "2026-04-01"
         },
         "framework": {

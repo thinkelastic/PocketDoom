@@ -310,15 +310,45 @@ voice_key_off(int ch)
  * Voice allocation
  * ============================================ */
 
+/* Track recently released voices to avoid reusing them while the OPL3
+ * release envelope is still audible.  Ring buffer of last 4 releases. */
+static int released_voices[4];
+static int released_head = 0;
+static int released_count = 0;
+
+static int recently_released(int v)
+{
+    int n = (released_count < 4) ? released_count : 4;
+    for (int i = 0; i < n; i++)
+        if (released_voices[(released_head - 1 - i) & 3] == v)
+            return 1;
+    return 0;
+}
+
+static void mark_released(int v)
+{
+    released_voices[released_head] = v;
+    released_head = (released_head + 1) & 3;
+    if (released_count < 4) released_count++;
+}
+
 PD_FASTTEXT static int
 alloc_voice(int mus_channel)
 {
     int i;
 
+    /* Prefer inactive voices that are NOT recently released (OPL3 release
+     * envelope may still be audible on those). */
+    for (i = 0; i < NUM_OPL_VOICES; i++)
+        if (!voices[i].active && !recently_released(i))
+            return i;
+
+    /* Fall back to any inactive voice (release has likely decayed). */
     for (i = 0; i < NUM_OPL_VOICES; i++)
         if (!voices[i].active)
             return i;
 
+    /* Steal from same channel as last resort. */
     for (i = 0; i < NUM_OPL_VOICES; i++)
         if (voices[i].mus_channel == mus_channel)
             return i;
@@ -393,8 +423,18 @@ note_on(int mus_channel, int note, int velocity)
 
     idx = alloc_voice(mus_channel);
 
-    if (voices[idx].active)
+    if (voices[idx].active) {
         voice_key_off(idx);
+        mark_released(idx);
+    }
+
+    /* Force instant silence before loading new instrument:
+     * fastest release (0x0F) + max attenuation (0x3F) so the
+     * OPL3 goes silent before we reconfigure the operators. */
+    opl_write(0x80 + op1_off[idx], 0x0F);
+    opl_write(0x80 + op2_off[idx], 0x0F);
+    opl_write(0x40 + op1_off[idx], 0x3F);
+    opl_write(0x40 + op2_off[idx], 0x3F);
 
     set_instrument(idx, &instr->voice[0]);
     set_volume(idx, velocity);
@@ -418,6 +458,7 @@ note_off(int mus_channel, int note)
             && voices[i].note == note) {
             voice_key_off(i);
             voices[i].active = 0;
+            mark_released(i);
             break;
         }
     }

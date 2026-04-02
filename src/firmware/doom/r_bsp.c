@@ -509,7 +509,6 @@ PD_FASTTEXT void R_Subsector (int num)
     int                 count;
     seg_t*              line;
     subsector_t*        sub;
-    extern void OPL_AdvanceMusic(void);
 
 #ifdef RANGECHECK
     if (num>=numsubsectors)
@@ -517,8 +516,6 @@ PD_FASTTEXT void R_Subsector (int num)
                  num,
                  numsubsectors);
 #endif
-
-    OPL_AdvanceMusic ();
 
     sscount++;
     sub = &subsectors[num];

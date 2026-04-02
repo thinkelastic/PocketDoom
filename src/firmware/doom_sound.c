@@ -106,6 +106,7 @@ void audio_dma_isr(void)
 {
     ADMA_STATUS = ADMA_STATUS_IRQ;   /* W1C: clear irq_pending */
     adma_need_fill = 1;
+    OPL_AdvanceMusic();
 }
 
 /* ============================================
@@ -243,7 +244,7 @@ void I_SetChannels(void)
 
     for (i = 0; i < 128; i++)
         for (j = 0; j < 256; j++)
-            vol_lookup[i * 256 + j] = (i * (j - 128) * 256) / 127;
+            vol_lookup[i * 256 + j] = (i * (j - 128) * 160) / 127;
 }
 
 /* ============================================

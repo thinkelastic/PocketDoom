@@ -917,9 +917,8 @@ PD_FASTTEXT void R_SetupFrame (player_t* player)
 //
 PD_FASTTEXT void R_RenderPlayerView (player_t* player)
 {
-    /* Advance OPL2 music between rendering passes so notes don't
-     * sustain/stutter when a complex frame takes a long time. */
-    extern void OPL_AdvanceMusic(void);
+    /* OPL music is now advanced from the audio DMA ISR for
+     * consistent timing independent of frame rendering. */
 
     R_SetupFrame (player);
 
@@ -945,7 +944,6 @@ PD_FASTTEXT void R_RenderPlayerView (player_t* player)
     // The head node is the last node output.
     R_RenderBSPNode (numnodes-1);
 
-    OPL_AdvanceMusic ();
     I_UpdateSound ();   // keep ring buffer fed during heavy rendering
 
     // Check for new console commands.
@@ -953,15 +951,12 @@ PD_FASTTEXT void R_RenderPlayerView (player_t* player)
 
     R_DrawPlanes ();
 
-    OPL_AdvanceMusic ();
     I_UpdateSound ();   // keep ring buffer fed during heavy rendering
 
     // Check for new console commands.
     NetUpdate ();
 
     R_DrawMasked ();
-
-    OPL_AdvanceMusic ();
 
     // Check for new console commands.
     NetUpdate ();
