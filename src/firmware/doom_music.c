@@ -390,6 +390,8 @@ apply_pitch_bend(int ch, int bend)
  * Note on / off
  * ============================================ */
 
+static void note_off(int mus_channel, int note);
+
 PD_FASTTEXT static void
 note_on(int mus_channel, int note, int velocity)
 {
@@ -397,6 +399,12 @@ note_on(int mus_channel, int note, int velocity)
     const genmidi_instr_t *instr;
 
     if (!genmidi_loaded) return;
+
+    /* Implicit note-off: if this note is already sounding on this channel,
+     * release it first.  Matches original DMX / Chocolate Doom behavior.
+     * Without this, retriggering the same note allocates a second OPL voice
+     * and both copies play simultaneously, causing a phasing artifact. */
+    note_off(mus_channel, note);
 
     if (mus_channel == PERCUSSION_CHAN) {
         instr_idx = note - 35 + PERCUSSION_BASE;
@@ -641,6 +649,15 @@ mus_process_events(void)
 
 #define MUS_CYCLE_LO  (*(volatile uint32_t *)0x40000004)
 
+/* Hardware timer registers (sysreg space) */
+#define TIMER_PERIOD  (*(volatile uint32_t *)0x40000088)
+#define TIMER_CTRL    (*(volatile uint32_t *)0x4000008C)
+#define TIMER_CTRL_ENABLE  (1u << 0)
+#define TIMER_CTRL_IRQ_CLR (1u << 1)   /* W1C: clear irq_pending */
+
+/* 100 MHz / 140 Hz = 714285.7 → 714286 cycles per tick */
+#define TIMER_PERIOD_140HZ 714286
+
 static uint32_t mus_last_cycles;
 static int      mus_time_init;
 
@@ -685,6 +702,16 @@ OPL_AdvanceMusic(void)
 
     while (mus_delay <= 0 && mus_playing)
         mus_process_events();
+}
+
+/* ============================================
+ * Music timer ISR — called at 140 Hz from trap handler
+ * ============================================ */
+
+void music_timer_isr(void)
+{
+    TIMER_CTRL = TIMER_CTRL_ENABLE | TIMER_CTRL_IRQ_CLR;
+    OPL_AdvanceMusic();
 }
 
 /* ============================================
@@ -739,7 +766,14 @@ I_InitMusic(void)
 
     load_genmidi();
 
-    printf("I_InitMusic: ready\n");
+    /* Start 140 Hz hardware timer for music tick processing.
+     * Machine timer interrupt (mie bit 7) is separate from the external
+     * interrupt used by the audio DMA, so both can fire independently. */
+    TIMER_PERIOD = TIMER_PERIOD_140HZ;
+    TIMER_CTRL   = TIMER_CTRL_ENABLE;
+    __asm__ volatile ("csrs mie, %0" :: "r"(1u << 7));  /* Enable MIE[7] = MTIE */
+
+    printf("I_InitMusic: ready (140 Hz music timer started)\n");
 }
 
 void

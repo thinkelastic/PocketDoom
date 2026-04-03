@@ -11,6 +11,9 @@ extern volatile unsigned int pd_dbg_info;
 /* Audio DMA ISR (defined in doom_sound.c) */
 extern void audio_dma_isr(void);
 
+/* Music timer ISR (defined in doom_music.c) */
+extern void music_timer_isr(void);
+
 /* Trap frame layout (matches start.S) */
 typedef struct {
     unsigned int regs[32];   /* x0-x31 (x0 always 0) at offset 0 */
@@ -137,6 +140,10 @@ int handle_misaligned(trap_frame_t *frame) {
         unsigned int code = mcause & 0x7FFFFFFF;
         if (code == 11) {  /* Machine external interrupt */
             audio_dma_isr();
+            return 1;
+        }
+        if (code == 7) {   /* Machine timer interrupt */
+            music_timer_isr();
             return 1;
         }
         return 0;  /* Unhandled interrupt → fatal */

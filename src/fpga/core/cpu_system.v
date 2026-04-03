@@ -92,7 +92,10 @@ module cpu_system (
     input  wire [1:0]  m_local_bresp,
 
     // External interrupt (active high)
-    input  wire        int_m_external
+    input  wire        int_m_external,
+
+    // Timer interrupt (active high, drives machine timer interrupt)
+    input  wire        int_m_timer
 );
 
 // ============================================
@@ -176,7 +179,7 @@ VexiiRiscv cpu (
     .reset(reset),
 
     .PrivilegedPlugin_logic_rdtime(rdtime_counter),
-    .PrivilegedPlugin_logic_harts_0_int_m_timer(1'b0),
+    .PrivilegedPlugin_logic_harts_0_int_m_timer(int_m_timer),
     .PrivilegedPlugin_logic_harts_0_int_m_software(1'b0),
     .PrivilegedPlugin_logic_harts_0_int_m_external(int_m_external),
 

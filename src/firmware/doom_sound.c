@@ -26,9 +26,6 @@
 #include "z_zone.h"
 #include "m_argv.h"
 
-/* From doom_music.c — advance MUS parser based on real elapsed time */
-extern void OPL_AdvanceMusic(void);
-
 /* ============================================
  * Hardware audio registers
  * ============================================ */
@@ -106,7 +103,6 @@ void audio_dma_isr(void)
 {
     ADMA_STATUS = ADMA_STATUS_IRQ;   /* W1C: clear irq_pending */
     adma_need_fill = 1;
-    OPL_AdvanceMusic();
 }
 
 /* ============================================

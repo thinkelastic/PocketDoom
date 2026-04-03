@@ -128,7 +128,10 @@ module axi_periph_slave (
 
     // Shutdown handshake
     input wire         shutdown_pending,
-    output reg         shutdown_ack
+    output reg         shutdown_ack,
+
+    // Configurable timer IRQ (active high, directly drives int_m_timer)
+    output wire        timer_irq
 );
 
 wire reset = ~reset_n;
@@ -271,6 +274,57 @@ synch_3 #(.WIDTH(32)) s_cont1_joy(.i(cont1_joy), .o(cont1_joy_s), .clk(clk), .ri
 synch_3 #(.WIDTH(16)) s_cont1_trig(.i(cont1_trig), .o(cont1_trig_s), .clk(clk), .rise(), .fall());
 
 // ============================================
+// Configurable timer (MMIO in sysreg space)
+// ============================================
+// Auto-reload countdown timer with interrupt output.
+// TIMER_PERIOD (0x40000088, sysreg offset 0x22): reload value (R/W)
+//   Writing also resets the counter to the new value.
+// TIMER_CTRL   (0x4000008C, sysreg offset 0x23): [0]=enable, [1]=irq pending (W1C)
+// IRQ output asserted while (enable && irq_pending).
+reg [31:0] timer_period;    // Auto-reload value
+reg [31:0] timer_counter;   // Countdown counter
+reg        timer_enable;
+reg        timer_irq_pending;
+
+assign timer_irq = timer_enable & timer_irq_pending;
+
+always @(posedge clk or posedge reset) begin
+    if (reset) begin
+        timer_period      <= 32'd0;
+        timer_counter     <= 32'd0;
+        timer_enable      <= 1'b0;
+        timer_irq_pending <= 1'b0;
+    end else begin
+        // Countdown and auto-reload
+        if (timer_enable && timer_period != 32'd0) begin
+            if (timer_counter == 32'd0) begin
+                timer_counter     <= timer_period - 32'd1;
+                timer_irq_pending <= 1'b1;
+            end else begin
+                timer_counter <= timer_counter - 32'd1;
+            end
+        end
+
+        // Register writes (active on sysreg_wr_fire, handled in parallel
+        // with the main sysreg write block below)
+        if (sysreg_wr_fire) begin
+            case (req_addr[7:2])
+                6'b100010: begin  // TIMER_PERIOD
+                    timer_period  <= req_wdata;
+                    timer_counter <= req_wdata - 32'd1;
+                end
+                6'b100011: begin  // TIMER_CTRL
+                    timer_enable <= req_wdata[0];
+                    if (req_wdata[1])           // W1C: clear irq_pending
+                        timer_irq_pending <= 1'b0;
+                end
+                default: ;
+            endcase
+        end
+    end
+end
+
+// ============================================
 // System register write logic
 // ============================================
 reg sysreg_wr_fire;
@@ -403,6 +457,8 @@ always @(*) begin
         6'b011110: sysreg_rdata = refresh_rate;
         6'b011111: sysreg_rdata = {22'b0, vrr_v_total};
         6'b100000: sysreg_rdata = {16'b0, sdram_wr_drops};  // 0x80
+        6'b100010: sysreg_rdata = timer_period;               // 0x88
+        6'b100011: sysreg_rdata = {30'b0, timer_irq_pending, timer_enable}; // 0x8C
         default: sysreg_rdata = 32'h0;
     endcase
 end

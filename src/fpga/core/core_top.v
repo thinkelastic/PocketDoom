@@ -704,6 +704,7 @@ wire [9:0]  audio_buf_level;
 wire        adma_sample_wr;
 wire [31:0] adma_sample_data;
 wire        adma_irq;
+wire        timer_irq;
 wire        adma_reg_wr;
 wire [4:0]  adma_reg_addr;
 wire [31:0] adma_reg_wdata;
@@ -1704,7 +1705,8 @@ assign video_hs = vidout_hs;
         .m_local_bvalid(cpu_m_local_bvalid),
         .m_local_bresp(cpu_m_local_bresp),
         // External interrupt
-        .int_m_external(adma_irq)
+        .int_m_external(adma_irq),
+        .int_m_timer(timer_irq)
     );
 
     // AXI4 peripheral slave
@@ -1797,7 +1799,8 @@ assign video_hs = vidout_hs;
         .sdram_wr_drops(sdram_wr_drops),
         .sdram_wr_drop_clear(sdram_wr_drop_clear),
         .shutdown_pending(shutdown_pending_cpu),
-        .shutdown_ack(shutdown_ack_cpu)
+        .shutdown_ack(shutdown_ack_cpu),
+        .timer_irq(timer_irq)
     );
 
     // Slave → io_sdram pulse adapter + bridge direct SDRAM reads
