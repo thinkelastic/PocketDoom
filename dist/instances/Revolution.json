@@ -1,0 +1,41 @@
+{
+    "instance": {
+        "magic": "APF_VER_1",
+        "variant_select": {
+            "id": 666,
+            "select": false
+        },
+        "memory_writes": [
+            {
+                "address": "0xF7000010",
+                "data": "0x00000002"
+            }
+        ],
+        "data_slots": [
+            {
+                "id": 0,
+                "filename": "doom2/DOOM2.WAD"
+            },
+            {
+                "id": 1,
+                "filename": "doom.bin"
+            },
+            {
+                "id": 2,
+                "filename": "revolution/TVR!.WAD"
+            },
+            {
+                "id": 3,
+                "filename": "default.cfg"
+            },
+            {
+                "id": 5,
+                "filename": "revolution/Revolution.sav"
+            },
+            {
+                "id": 6,
+                "filename": "revolution/Revolution.cfg"
+            }
+        ]
+    }
+}

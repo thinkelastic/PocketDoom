@@ -274,6 +274,86 @@ void W_Reload (void)
 
 
 //
+// W_MergeLumps
+// Merge PWAD sprite/flat namespaces into the IWAD's.
+// Finds SS_START..SS_END / FF_START..FF_END in the PWAD
+// and inserts those lumps into the IWAD's S_START..S_END /
+// F_START..F_END sections. This lets vanilla lookup code
+// work without modification.
+//
+static void W_MergeLumps (const char *pwad_start, const char *pwad_end,
+                          const char *iwad_end)
+{
+    int iwad_end_idx = -1;
+    int pwad_start_idx = -1;
+    int pwad_end_idx = -1;
+    int i, count;
+    lumpinfo_t *newinfo;
+
+    // Find the IWAD's end marker (first occurrence, scanning forward)
+    for (i = 0; i < numlumps; i++)
+    {
+        if (!strncasecmp(lumpinfo[i].name, iwad_end, 8))
+        {
+            iwad_end_idx = i;
+            break;
+        }
+    }
+    if (iwad_end_idx == -1)
+        return;  // no IWAD section
+
+    // Find the PWAD's start/end markers (after the IWAD section)
+    for (i = iwad_end_idx + 1; i < numlumps; i++)
+    {
+        if (!strncasecmp(lumpinfo[i].name, pwad_start, 8))
+            pwad_start_idx = i;
+        if (!strncasecmp(lumpinfo[i].name, pwad_end, 8))
+            pwad_end_idx = i;
+    }
+    if (pwad_start_idx == -1 || pwad_end_idx == -1 ||
+        pwad_end_idx <= pwad_start_idx)
+        return;  // no PWAD section
+
+    // Number of lumps to move (excluding the markers themselves)
+    count = pwad_end_idx - pwad_start_idx - 1;
+    if (count <= 0)
+        return;
+
+    // Build a new lump directory with PWAD lumps inserted before
+    // the IWAD's end marker, and PWAD markers + lumps removed
+    // from their original position.
+    newinfo = malloc(numlumps * sizeof(lumpinfo_t));
+    if (!newinfo)
+        I_Error("W_MergeLumps: malloc failed");
+
+    {
+        int dst = 0;
+
+        // Copy everything up to (not including) the IWAD end marker
+        for (i = 0; i < iwad_end_idx; i++)
+            newinfo[dst++] = lumpinfo[i];
+
+        // Insert the PWAD lumps here
+        for (i = pwad_start_idx + 1; i < pwad_end_idx; i++)
+            newinfo[dst++] = lumpinfo[i];
+
+        // Copy the IWAD end marker
+        newinfo[dst++] = lumpinfo[iwad_end_idx];
+
+        // Copy everything after IWAD end marker, skipping the PWAD section
+        for (i = iwad_end_idx + 1; i < numlumps; i++)
+        {
+            if (i >= pwad_start_idx && i <= pwad_end_idx)
+                continue;
+            newinfo[dst++] = lumpinfo[i];
+        }
+        numlumps = dst;
+    }
+
+    free(lumpinfo);
+    lumpinfo = newinfo;
+}
+
 // W_InitMultipleFiles
 // Pass a null terminated list of files to use.
 // All files are optional, but at least one file
@@ -301,6 +381,11 @@ void W_InitMultipleFiles (char** filenames)
 
     if (!numlumps)
         I_Error ("W_InitFiles: no files found");
+
+    // Merge PWAD sprite/flat namespaces into the IWAD's sections
+    // so that vanilla range-based lookups work correctly.
+    W_MergeLumps ("SS_START", "SS_END", "S_END");
+    W_MergeLumps ("FF_START", "FF_END", "F_END");
 
     // set up caching
     size = numlumps * sizeof(*lumpcache);

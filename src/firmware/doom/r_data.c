@@ -669,34 +669,8 @@ void R_InitSpriteLumps (void)
     int         i;
     patch_t     *patch;
 
-    // Scan forward for the first S_START / SS_START marker (IWAD's).
-    // Scan backward for the last S_END / SS_END marker (PWAD's, if present).
-    // This ensures the sprite range covers both IWAD and PWAD sprites.
-    firstspritelump = -1;
-    for (i = 0; i < numlumps; i++)
-    {
-        if (!strncasecmp(lumpinfo[i].name, "S_START", 8) ||
-            !strncasecmp(lumpinfo[i].name, "SS_START", 8))
-        {
-            firstspritelump = i + 1;
-            break;
-        }
-    }
-    if (firstspritelump == -1)
-        I_Error("R_InitSpriteLumps: S_START not found");
-
-    lastspritelump = -1;
-    for (i = numlumps - 1; i >= 0; i--)
-    {
-        if (!strncasecmp(lumpinfo[i].name, "S_END", 8) ||
-            !strncasecmp(lumpinfo[i].name, "SS_END", 8))
-        {
-            lastspritelump = i - 1;
-            break;
-        }
-    }
-    if (lastspritelump == -1)
-        I_Error("R_InitSpriteLumps: S_END not found");
+    firstspritelump = W_GetNumForName ("S_START") + 1;
+    lastspritelump = W_GetNumForName ("S_END") - 1;
 
     numspritelumps = lastspritelump - firstspritelump + 1;
     spritewidth = Z_Malloc (numspritelumps*4, PU_STATIC, 0);

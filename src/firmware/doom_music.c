@@ -400,12 +400,6 @@ note_on(int mus_channel, int note, int velocity)
 
     if (!genmidi_loaded) return;
 
-    /* Implicit note-off: if this note is already sounding on this channel,
-     * release it first.  Matches original DMX / Chocolate Doom behavior.
-     * Without this, retriggering the same note allocates a second OPL voice
-     * and both copies play simultaneously, causing a phasing artifact. */
-    note_off(mus_channel, note);
-
     if (mus_channel == PERCUSSION_CHAN) {
         instr_idx = note - 35 + PERCUSSION_BASE;
         if (instr_idx < PERCUSSION_BASE || instr_idx >= GENMIDI_NUM_INSTRS)
@@ -429,11 +423,27 @@ note_on(int mus_channel, int note, int velocity)
     if (play_note < 0)   play_note = 0;
     if (play_note > 127) play_note = 127;
 
-    idx = alloc_voice(mus_channel);
+    /* Retrigger: if this note is already sounding on this channel,
+     * reuse the SAME OPL voice.  Allocating a different voice would
+     * leave the old voice's release envelope audible alongside the
+     * new attack, producing a phasing / double-attack artifact. */
+    idx = -1;
+    for (int i = 0; i < NUM_OPL_VOICES; i++) {
+        if (voices[i].active
+            && voices[i].mus_channel == mus_channel
+            && voices[i].note == note) {
+            idx = i;
+            voice_key_off(i);
+            break;
+        }
+    }
 
-    if (voices[idx].active) {
-        voice_key_off(idx);
-        mark_released(idx);
+    if (idx < 0) {
+        idx = alloc_voice(mus_channel);
+        if (voices[idx].active) {
+            voice_key_off(idx);
+            mark_released(idx);
+        }
     }
 
     /* Force instant silence before loading new instrument:

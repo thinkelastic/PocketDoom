@@ -123,8 +123,15 @@ R_InstallSpriteLump
     {
         // the lump should be used for all rotations
         if (sprtemp[frame].rotate == false)
-            I_Error ("R_InitSprites: Sprite %s frame %c has "
-                     "multip rot=0 lump", spritename, 'A'+frame);
+        {
+            // PWAD overrides IWAD sprite — allow replacement
+            for (r=0 ; r<8 ; r++)
+            {
+                sprtemp[frame].lump[r] = lump - firstspritelump;
+                sprtemp[frame].flip[r] = (byte)flipped;
+            }
+            return;
+        }
 
         if (sprtemp[frame].rotate == true)
             I_Error ("R_InitSprites: Sprite %s frame %c has rotations "
@@ -141,17 +148,16 @@ R_InstallSpriteLump
 
     // the lump is only used for one rotation
     if (sprtemp[frame].rotate == false)
-        I_Error ("R_InitSprites: Sprite %s frame %c has rotations "
-                 "and a rot=0 lump", spritename, 'A'+frame);
-
-    sprtemp[frame].rotate = true;
+    {
+        // PWAD overrides rot=0 with rotations — allow it
+        sprtemp[frame].rotate = true;
+        memset(sprtemp[frame].lump, -1, sizeof(sprtemp[frame].lump));
+    }
+    else
+        sprtemp[frame].rotate = true;
 
     // make 0 based
     rotation--;
-    if (sprtemp[frame].lump[rotation] != -1)
-        I_Error ("R_InitSprites: Sprite %s : %c : %c "
-                 "has two lumps mapped to it",
-                 spritename, 'A'+frame, '1'+rotation);
 
     sprtemp[frame].lump[rotation] = lump - firstspritelump;
     sprtemp[frame].flip[rotation] = (byte)flipped;
@@ -221,6 +227,10 @@ void R_InitSpriteDefs (char** namelist)
             {
                 frame = lumpinfo[l].name[4] - 'A';
                 rotation = lumpinfo[l].name[5] - '0';
+
+                // Skip non-sprite lumps caught in the range
+                if (frame < 0 || frame >= 29 || rotation < 0 || rotation > 8)
+                    continue;
 
                 if (modifiedgame)
                     patched = W_GetNumForName (lumpinfo[l].name);
